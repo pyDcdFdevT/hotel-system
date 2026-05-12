@@ -1,4 +1,4 @@
-import { get, formatBs, formatUsd, formatRate, showToast } from "./api.js";
+import { get, formatBs, formatUsd, showToast } from "./api.js";
 import { refreshHeaderTasas } from "./config.js";
 
 const els = {
@@ -11,12 +11,21 @@ const els = {
   habsOcupadas: document.getElementById("dash-habs-ocupadas"),
   bajoStock: document.getElementById("dash-bajo-stock"),
   tablaBajoStock: document.getElementById("dash-tabla-bajo-stock"),
+  areaHabUsd: document.getElementById("dash-area-habitaciones-usd"),
+  areaHabBs: document.getElementById("dash-area-habitaciones-bs"),
+  areaBarUsd: document.getElementById("dash-area-bar-usd"),
+  areaBarBs: document.getElementById("dash-area-bar-bs"),
+  areaCocinaUsd: document.getElementById("dash-area-cocina-usd"),
+  areaCocinaBs: document.getElementById("dash-area-cocina-bs"),
+  areaTotalUsd: document.getElementById("dash-area-total-usd"),
+  areaTotalBs: document.getElementById("dash-area-total-bs"),
 };
 
 export async function loadDashboard() {
   try {
-    const [resumen] = await Promise.all([
+    const [resumen, ventasArea] = await Promise.all([
       get("/reportes/resumen-dia"),
+      get("/reportes/ventas-por-area"),
       refreshHeaderTasas(),
     ]);
     if (els.ventasBs) els.ventasBs.textContent = formatBs(resumen.ventas_bs);
@@ -30,10 +39,28 @@ export async function loadDashboard() {
     }
     if (els.bajoStock) els.bajoStock.textContent = resumen.productos_bajo_stock;
 
+    renderVentasArea(ventasArea);
     await loadBajoStockTabla();
   } catch (error) {
     showToast(`Error cargando dashboard: ${error.message}`, "error");
   }
+}
+
+function renderVentasArea(data) {
+  if (!data || !Array.isArray(data.areas)) return;
+  const map = Object.fromEntries(
+    data.areas.map((a) => [a.area, a]),
+  );
+  const setArea = (elUsd, elBs, area) => {
+    const v = map[area] || { ventas_bs: 0, ventas_usd: 0 };
+    if (elUsd) elUsd.textContent = formatUsd(v.ventas_usd);
+    if (elBs) elBs.textContent = formatBs(v.ventas_bs);
+  };
+  setArea(els.areaHabUsd, els.areaHabBs, "habitaciones");
+  setArea(els.areaBarUsd, els.areaBarBs, "bar");
+  setArea(els.areaCocinaUsd, els.areaCocinaBs, "cocina");
+  if (els.areaTotalUsd) els.areaTotalUsd.textContent = formatUsd(data.total_usd);
+  if (els.areaTotalBs) els.areaTotalBs.textContent = formatBs(data.total_bs);
 }
 
 async function loadBajoStockTabla() {

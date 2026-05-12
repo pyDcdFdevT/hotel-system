@@ -28,13 +28,17 @@ from app.models import (
 TASA_INICIAL_BCV = Decimal("405.35")
 TASA_INICIAL_PARALELO = Decimal("415.00")
 
+# Precio actual de habitación: USD 20.
+HABITACION_PRECIO_USD = Decimal("20.00")
+HABITACION_PRECIO_BS = Decimal("8000.00")
+
 
 HABITACIONES_INICIALES = [
     {
         "numero": f"{numero}",
         "tipo": "standard",
-        "precio_usd": Decimal("40.00"),
-        "precio_bs": Decimal("16000.00"),
+        "precio_usd": HABITACION_PRECIO_USD,
+        "precio_bs": HABITACION_PRECIO_BS,
         "estado": "disponible",
     }
     for numero in range(101, 111)
@@ -69,46 +73,104 @@ CUENTAS_RENOMBRADAS = {
 }
 
 
-PRODUCTOS_INICIALES = [
+# ---------------------------------------------------------------------------
+# Menú del hotel
+# ---------------------------------------------------------------------------
+# Áreas válidas: "cocina", "bar", "general".
+# La tasa BCV inicial es ~405 Bs/USD; usamos un redondeo razonable.
+
+_BCV = TASA_INICIAL_BCV
+
+
+def _precio_bs(usd: Decimal) -> Decimal:
+    return (usd * _BCV).quantize(Decimal("0.01"))
+
+
+# Tuplas: (nombre, area, categoria, precio_usd, porcion)
+MENU = [
+    # ---------------- COCINA ----------------
+    # Para Picar
+    ("Tequeños", "cocina", "Para Picar", Decimal("6.00"), None),
+    ("Papas Francesas", "cocina", "Para Picar", Decimal("5.00"), None),
+    ("Tiritas de Pollo", "cocina", "Para Picar", Decimal("8.00"), None),
+    ("Tabla de Quesos", "cocina", "Para Picar", Decimal("9.00"), None),
+    ("Nachos con Queso", "cocina", "Para Picar", Decimal("7.00"), None),
+    # Desayunos
+    ("Sandwich", "cocina", "Desayunos", Decimal("3.00"), None),
+    ("Desayuno Criollo", "cocina", "Desayunos", Decimal("8.00"), None),
+    ("Desayuno Americano", "cocina", "Desayunos", Decimal("8.00"), None),
+    ("Omelette", "cocina", "Desayunos", Decimal("6.00"), None),
+    ("Desayuno Minero", "cocina", "Desayunos", Decimal("6.00"), None),
+    # A la Carta
+    ("Hamburguesa Clásica", "cocina", "A la Carta", Decimal("5.00"), None),
+    ("Hamburguesa Cumbre", "cocina", "A la Carta", Decimal("10.00"), None),
+    ("Club House", "cocina", "A la Carta", Decimal("10.00"), None),
+    ("Parrilla de Lomito P1", "cocina", "A la Carta", Decimal("12.00"), "P1"),
+    ("Parrilla de Lomito P2", "cocina", "A la Carta", Decimal("20.00"), "P2"),
+    ("Churrasco de Solomo", "cocina", "A la Carta", Decimal("12.00"), None),
+    ("Churrasco de Lau-Lau", "cocina", "A la Carta", Decimal("10.00"), None),
+    ("Cuadritos de Lau-Lau", "cocina", "A la Carta", Decimal("9.00"), None),
+
+    # ---------------- BAR ----------------
+    # Ligeras
+    ("Agua Mineral", "bar", "Ligeras", Decimal("1.50"), None),
+    ("Refresco", "bar", "Ligeras", Decimal("2.00"), None),
+    ("Jugo Natural", "bar", "Ligeras", Decimal("3.00"), None),
+    # Cervezas
+    ("Cerveza Solera", "bar", "Cervezas", Decimal("1.50"), None),
+    ("Cerveza Pilsen", "bar", "Cervezas", Decimal("1.30"), None),
+    ("Cerveza Light", "bar", "Cervezas", Decimal("1.30"), None),
+    # Rones
+    ("Ron Estelar 1L", "bar", "Rones", Decimal("15.00"), "1L"),
+    ("Ron Cacique 1L", "bar", "Rones", Decimal("18.00"), "1L"),
+    ("Ron Santa Teresa 1L", "bar", "Rones", Decimal("20.00"), "1L"),
+    # Whisky
+    ("Whisky Black and White", "bar", "Whisky", Decimal("30.00"), None),
+    ("Whisky Buchanan's 12", "bar", "Whisky", Decimal("55.00"), None),
+    ("Whisky Old Parr", "bar", "Whisky", Decimal("60.00"), None),
+    # Licores
+    ("Vodka Absolut", "bar", "Licores", Decimal("35.00"), None),
+    ("Tequila José Cuervo", "bar", "Licores", Decimal("40.00"), None),
+    ("Ginebra Gordon's", "bar", "Licores", Decimal("28.00"), None),
+    # Vinos
+    ("Vino Tinto Casa", "bar", "Vinos", Decimal("18.00"), None),
+    ("Vino Blanco Casa", "bar", "Vinos", Decimal("18.00"), None),
+    ("Sangría", "bar", "Vinos", Decimal("5.00"), None),
+    # Cockeles
+    ("Mojito", "bar", "Cockeles", Decimal("6.00"), None),
+    ("Piña Colada", "bar", "Cockeles", Decimal("6.00"), None),
+    ("Margarita", "bar", "Cockeles", Decimal("6.00"), None),
+    ("Daiquiri", "bar", "Cockeles", Decimal("6.00"), None),
+    ("Cuba Libre", "bar", "Cockeles", Decimal("5.00"), None),
+]
+
+
+PRODUCTOS_MENU = [
     {
-        "nombre": "Polar",
-        "categoria": "bebidas",
-        "descripcion": "Cerveza Polar 222 ml",
-        "precio_bs": Decimal("1000.00"),
-        "precio_usd": Decimal("2.50"),
-        "costo_bs": Decimal("600.00"),
-        "stock_actual": Decimal("48"),
-        "stock_minimo": Decimal("12"),
-        "unidad": "botella",
-        "es_para_venta": True,
-    },
-    {
-        "nombre": "Agua",
-        "categoria": "bebidas",
-        "descripcion": "Botella de agua 500 ml",
-        "precio_bs": Decimal("400.00"),
-        "precio_usd": Decimal("1.00"),
-        "costo_bs": Decimal("180.00"),
-        "stock_actual": Decimal("60"),
-        "stock_minimo": Decimal("20"),
-        "unidad": "botella",
-        "es_para_venta": True,
-    },
-    {
-        "nombre": "Hamburguesa",
-        "categoria": "comida",
-        "descripcion": "Hamburguesa de la casa",
-        "precio_bs": Decimal("3200.00"),
-        "precio_usd": Decimal("8.00"),
-        "costo_bs": Decimal("0.00"),
-        "stock_actual": Decimal("0"),
-        "stock_minimo": Decimal("0"),
+        "nombre": nombre,
+        "area": area,
+        "categoria": categoria,
+        "porcion": porcion,
+        "descripcion": None,
+        "precio_usd": precio_usd,
+        "precio_bs": _precio_bs(precio_usd),
+        "costo_bs": Decimal("0"),
+        # Stock inicial razonable; ajustable luego desde Inventario.
+        "stock_actual": Decimal("100"),
+        "stock_minimo": Decimal("5"),
         "unidad": "unidad",
         "es_para_venta": True,
-    },
+    }
+    for (nombre, area, categoria, precio_usd, porcion) in MENU
+]
+
+
+# Insumos para recetas
+PRODUCTOS_INSUMO = [
     {
         "nombre": "Pan hamburguesa",
-        "categoria": "insumo",
+        "area": "cocina",
+        "categoria": "Insumo",
         "descripcion": "Pan tipo brioche",
         "precio_bs": Decimal("0"),
         "precio_usd": Decimal("0"),
@@ -120,7 +182,8 @@ PRODUCTOS_INICIALES = [
     },
     {
         "nombre": "Carne para hamburguesa",
-        "categoria": "insumo",
+        "area": "cocina",
+        "categoria": "Insumo",
         "descripcion": "Carne molida 150 g",
         "precio_bs": Decimal("0"),
         "precio_usd": Decimal("0"),
@@ -132,7 +195,8 @@ PRODUCTOS_INICIALES = [
     },
     {
         "nombre": "Lechuga",
-        "categoria": "insumo",
+        "area": "cocina",
+        "categoria": "Insumo",
         "descripcion": "Hoja de lechuga",
         "precio_bs": Decimal("0"),
         "precio_usd": Decimal("0"),
@@ -145,7 +209,8 @@ PRODUCTOS_INICIALES = [
 ]
 
 
-RECETA_HAMBURGUESA = [
+# Receta básica para "Hamburguesa Clásica"
+RECETA_HAMBURGUESA_CLASICA = [
     ("Pan hamburguesa", Decimal("1")),
     ("Carne para hamburguesa", Decimal("1")),
     ("Lechuga", Decimal("2")),
@@ -204,15 +269,33 @@ def seed() -> None:
         for hab in HABITACIONES_INICIALES:
             _upsert(db, Habitacion, {"numero": hab["numero"]}, hab)
 
+        # Productos del menú
         productos_por_nombre: dict[str, Producto] = {}
-        for prod in PRODUCTOS_INICIALES:
+        for prod in PRODUCTOS_MENU + PRODUCTOS_INSUMO:
             producto, _ = _upsert(db, Producto, {"nombre": prod["nombre"]}, prod)
             productos_por_nombre[prod["nombre"]] = producto
 
-        hamburguesa = productos_por_nombre["Hamburguesa"]
-        if not db.query(Receta).filter(Receta.producto_id == hamburguesa.id).first():
-            for nombre_ingrediente, cantidad in RECETA_HAMBURGUESA:
-                ingrediente = productos_por_nombre[nombre_ingrediente]
+        # Si existe una "Hamburguesa" antigua, dejarla migrada al nombre nuevo.
+        legacy = db.query(Producto).filter(Producto.nombre == "Hamburguesa").first()
+        if legacy and not db.query(Producto).filter(
+            Producto.nombre == "Hamburguesa Clásica"
+        ).first():
+            legacy.nombre = "Hamburguesa Clásica"
+            legacy.area = "cocina"
+            legacy.categoria = "A la Carta"
+            legacy.precio_usd = Decimal("5.00")
+            legacy.precio_bs = _precio_bs(Decimal("5.00"))
+            productos_por_nombre["Hamburguesa Clásica"] = legacy
+
+        # Receta de Hamburguesa Clásica
+        hamburguesa = productos_por_nombre.get("Hamburguesa Clásica")
+        if hamburguesa and not db.query(Receta).filter(
+            Receta.producto_id == hamburguesa.id
+        ).first():
+            for nombre_ingrediente, cantidad in RECETA_HAMBURGUESA_CLASICA:
+                ingrediente = productos_por_nombre.get(nombre_ingrediente)
+                if not ingrediente:
+                    continue
                 db.add(
                     Receta(
                         producto_id=hamburguesa.id,

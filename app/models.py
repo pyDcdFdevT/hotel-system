@@ -139,6 +139,8 @@ class Producto(Base):
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(120), nullable=False, unique=True, index=True)
     categoria = Column(String(60), default="general", nullable=False, index=True)
+    area = Column(String(20), default="general", nullable=False, index=True)
+    porcion = Column(String(20))
     descripcion = Column(String(255))
     precio_bs = Column(Numeric(12, 2), default=0, nullable=False)
     precio_usd = Column(Numeric(10, 2), default=0, nullable=False)

@@ -141,6 +141,75 @@ def _renombrar_cuentas(engine) -> None:
                 print(f"[check_db] Aviso renombrando {viejo}: {exc}")
 
 
+def _migrar_productos(engine) -> None:
+    """Asegura columnas ``area`` y ``porcion`` en ``productos``."""
+    if not _is_sqlite(engine):
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existe = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='productos'")
+        ).first()
+        if not existe:
+            return
+        info = conn.execute(text("PRAGMA table_info(productos)")).fetchall()
+        columnas = {row[1] for row in info}
+        if "area" not in columnas:
+            print("[check_db] Migrando productos: añadiendo columna 'area'…")
+            conn.execute(
+                text(
+                    "ALTER TABLE productos ADD COLUMN area VARCHAR(20) "
+                    "NOT NULL DEFAULT 'general'"
+                )
+            )
+            # Heurística: bebidas y cervezas → bar; comida/insumo/desayuno → cocina.
+            conn.execute(
+                text(
+                    "UPDATE productos SET area = 'bar' "
+                    "WHERE lower(categoria) IN ('bebidas','cervezas','ligeras','rones',"
+                    "'whisky','licores','vinos','cockeles','cocteles')"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE productos SET area = 'cocina' "
+                    "WHERE lower(categoria) IN ('comida','insumo','para picar','desayunos',"
+                    "'a la carta')"
+                )
+            )
+        if "porcion" not in columnas:
+            print("[check_db] Migrando productos: añadiendo columna 'porcion'…")
+            conn.execute(text("ALTER TABLE productos ADD COLUMN porcion VARCHAR(20)"))
+
+
+def _actualizar_precio_habitaciones(engine) -> None:
+    """Cambia el precio de las habitaciones que aún están en el viejo default ($40)."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existe = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='habitaciones'")
+        ).first()
+        if not existe and _is_sqlite(engine):
+            return
+        # Sólo actualizamos habitaciones que coinciden con el default antiguo
+        # ($40 USD / Bs 16000); así no pisamos precios que el usuario haya editado.
+        result = conn.execute(
+            text(
+                "UPDATE habitaciones "
+                "SET precio_usd = 20.00, precio_bs = 8000.00, "
+                "    updated_at = CURRENT_TIMESTAMP "
+                "WHERE precio_usd = 40.00 AND precio_bs = 16000.00"
+            )
+        )
+        if result.rowcount:
+            print(
+                f"[check_db] Habitaciones con precio antiguo actualizadas a $20: "
+                f"{result.rowcount} fila(s)"
+            )
+
+
 def main() -> None:
     _ensure_data_dir()
 
@@ -151,6 +220,8 @@ def main() -> None:
 
     _migrar_tasas_cambio(engine)
     _renombrar_cuentas(engine)
+    _migrar_productos(engine)
+    _actualizar_precio_habitaciones(engine)
 
     print("[check_db] Ejecutando create_all…")
     Base.metadata.create_all(bind=engine)

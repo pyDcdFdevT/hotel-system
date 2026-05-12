@@ -31,7 +31,7 @@ def test_tasa_actualizar_bcv_y_paralelo(client):
 
 def test_pago_movil_paga_pedido(client):
     productos = client.get("/api/productos/").json()
-    agua = next(p for p in productos if p["nombre"] == "Agua")
+    agua = next(p for p in productos if p["nombre"] == "Agua Mineral")
 
     pedido = client.post(
         "/api/pedidos/",
@@ -101,18 +101,19 @@ def test_resumen_dia(client):
 
 def test_flujo_pedido_con_receta_y_pago_mixto(client):
     productos = client.get("/api/productos/").json()
-    hamburguesa = next(p for p in productos if p["nombre"] == "Hamburguesa")
+    hamburguesa = next(p for p in productos if p["nombre"] == "Hamburguesa Clásica")
     pan_stock_inicial = float(next(p for p in productos if p["nombre"] == "Pan hamburguesa")["stock_actual"])
 
     pedido = client.post(
         "/api/pedidos/",
         json={"tipo": "restaurante", "items": [{"producto_id": hamburguesa["id"], "cantidad": 2}]},
     ).json()
-    assert float(pedido["total_usd"]) == 16.0
+    # Hamburguesa Clásica cuesta USD 5 → 2 unidades = USD 10.
+    assert float(pedido["total_usd"]) == 10.0
 
     pago = client.post(
         f"/api/pedidos/{pedido['id']}/pagar",
-        json={"metodo_pago": "mixto", "monto_bs": 2000, "monto_usd": 12},
+        json={"metodo_pago": "mixto", "monto_bs": 2000, "monto_usd": 6},
     )
     assert pago.status_code == 200, pago.text
     body = pago.json()
@@ -121,3 +122,64 @@ def test_flujo_pedido_con_receta_y_pago_mixto(client):
     productos2 = client.get("/api/productos/").json()
     pan_despues = float(next(p for p in productos2 if p["nombre"] == "Pan hamburguesa")["stock_actual"])
     assert pan_despues == pan_stock_inicial - 2
+
+
+def test_ventas_por_area(client):
+    productos = client.get("/api/productos/").json()
+    mojito = next(p for p in productos if p["nombre"] == "Mojito")
+    tequenos = next(p for p in productos if p["nombre"] == "Tequeños")
+
+    pedido_bar = client.post(
+        "/api/pedidos/",
+        json={"tipo": "bar", "items": [{"producto_id": mojito["id"], "cantidad": 2}]},
+    ).json()
+    client.post(
+        f"/api/pedidos/{pedido_bar['id']}/pagar",
+        json={"metodo_pago": "usd", "monto_usd": 12},
+    )
+
+    pedido_cocina = client.post(
+        "/api/pedidos/",
+        json={"tipo": "restaurante", "items": [{"producto_id": tequenos["id"], "cantidad": 1}]},
+    ).json()
+    client.post(
+        f"/api/pedidos/{pedido_cocina['id']}/pagar",
+        json={"metodo_pago": "usd", "monto_usd": 6},
+    )
+
+    resp = client.get("/api/reportes/ventas-por-area")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    areas = {a["area"]: a for a in data["areas"]}
+    # Bar incluye Mojito x2 (USD 12) más cualquier venta previa de otros tests.
+    assert float(areas["bar"]["ventas_usd"]) >= 12.0
+    assert float(areas["cocina"]["ventas_usd"]) >= 6.0
+    assert float(data["total_usd"]) >= 18.0
+
+
+def test_habitaciones_precio_actualizado(client):
+    habs = client.get("/api/habitaciones/").json()
+    assert all(float(h["precio_usd"]) == 20.0 for h in habs)
+
+
+def test_menu_completo_seed(client):
+    productos = client.get("/api/productos/").json()
+    nombres = {p["nombre"] for p in productos}
+    esperados = [
+        "Tequeños",
+        "Papas Francesas",
+        "Sandwich",
+        "Hamburguesa Clásica",
+        "Parrilla de Lomito P1",
+        "Parrilla de Lomito P2",
+        "Mojito",
+        "Whisky Black and White",
+        "Ron Estelar 1L",
+    ]
+    for nombre in esperados:
+        assert nombre in nombres, f"Falta producto del menú: {nombre}"
+    # Verifica que el área del producto se haya seteado correctamente.
+    mojito = next(p for p in productos if p["nombre"] == "Mojito")
+    assert mojito["area"] == "bar"
+    tequenos = next(p for p in productos if p["nombre"] == "Tequeños")
+    assert tequenos["area"] == "cocina"

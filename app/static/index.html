@@ -26,20 +26,44 @@
     </div>
     <nav class="bg-slate-900/60">
       <div class="max-w-7xl mx-auto px-4 flex flex-wrap gap-1">
-        <button class="tab-btn active text-sm px-4 py-2 text-white" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn active text-sm px-4 py-2 text-white" data-tab="dashboard">Inicio</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="habitaciones">Habitaciones</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="reservas">Reservas</button>
-        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="pos">POS</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="pos">Ventas</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="inventario">Inventario</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="gastos">Gastos</button>
-        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="config">Configuración</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="config">Tasas</button>
       </div>
     </nav>
   </header>
 
   <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
-    <!-- Dashboard -->
+    <!-- Inicio -->
     <section id="tab-dashboard" class="tab-panel active">
+      <h2 class="text-lg font-semibold mb-3">Ventas del día por área</h2>
+      <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="card p-4 border-l-4 border-amber-500">
+          <p class="text-xs uppercase text-slate-500">Habitaciones</p>
+          <p class="text-xl font-bold mt-1" id="dash-area-habitaciones-usd">$ --</p>
+          <p class="text-sm text-slate-500" id="dash-area-habitaciones-bs">Bs --</p>
+        </div>
+        <div class="card p-4 border-l-4 border-purple-500">
+          <p class="text-xs uppercase text-slate-500">Bar</p>
+          <p class="text-xl font-bold mt-1" id="dash-area-bar-usd">$ --</p>
+          <p class="text-sm text-slate-500" id="dash-area-bar-bs">Bs --</p>
+        </div>
+        <div class="card p-4 border-l-4 border-emerald-500">
+          <p class="text-xs uppercase text-slate-500">Cocina</p>
+          <p class="text-xl font-bold mt-1" id="dash-area-cocina-usd">$ --</p>
+          <p class="text-sm text-slate-500" id="dash-area-cocina-bs">Bs --</p>
+        </div>
+        <div class="card p-4 bg-slate-900 text-white">
+          <p class="text-xs uppercase opacity-80">Total general</p>
+          <p class="text-xl font-bold mt-1" id="dash-area-total-usd">$ --</p>
+          <p class="text-sm opacity-80" id="dash-area-total-bs">Bs --</p>
+        </div>
+      </div>
+      <h2 class="text-lg font-semibold mb-3">Resumen general</h2>
       <div class="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
         <div class="card p-4">
           <p class="text-xs uppercase text-slate-500">Ventas hoy (Bs)</p>

@@ -124,6 +124,8 @@ class ReservaOut(ORMModel):
 class ProductoBase(BaseModel):
     nombre: str = Field(..., min_length=2, max_length=120)
     categoria: str = Field(default="general", max_length=60)
+    area: str = Field(default="general", max_length=20)
+    porcion: Optional[str] = Field(default=None, max_length=20)
     descripcion: Optional[str] = Field(default=None, max_length=255)
     precio_bs: Decimal = Field(default=Decimal("0"), ge=0)
     precio_usd: Decimal = Field(default=Decimal("0"), ge=0)
@@ -142,6 +144,8 @@ class ProductoCreate(ProductoBase):
 class ProductoUpdate(BaseModel):
     nombre: Optional[str] = None
     categoria: Optional[str] = None
+    area: Optional[str] = None
+    porcion: Optional[str] = None
     descripcion: Optional[str] = None
     precio_bs: Optional[Decimal] = Field(default=None, ge=0)
     precio_usd: Optional[Decimal] = Field(default=None, ge=0)
@@ -157,6 +161,8 @@ class ProductoOut(ORMModel):
     id: int
     nombre: str
     categoria: str
+    area: str = "general"
+    porcion: Optional[str] = None
     descripcion: Optional[str] = None
     precio_bs: Decimal
     precio_usd: Decimal
@@ -166,6 +172,19 @@ class ProductoOut(ORMModel):
     unidad: str
     es_para_venta: bool
     activo: bool
+
+
+class VentasArea(BaseModel):
+    area: str
+    ventas_bs: Decimal
+    ventas_usd: Decimal
+
+
+class VentasPorArea(BaseModel):
+    fecha: date
+    areas: List[VentasArea]
+    total_bs: Decimal
+    total_usd: Decimal
 
 
 class RecetaIngrediente(BaseModel):
