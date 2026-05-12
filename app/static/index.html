@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hotel · Gestión Integral</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body class="app-shell">
+  <header class="app-header text-white shadow">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-bold">Hotel · Gestión Integral</h1>
+        <p class="text-sm opacity-80">Habitaciones, reservas, POS, inventario y gastos</p>
+      </div>
+      <div class="text-right">
+        <p class="text-xs uppercase tracking-wider opacity-80">Tasa de hoy</p>
+        <p class="text-xl font-semibold"><span id="dash-tasa-dia">--</span> <span class="text-sm opacity-80">Bs / USD</span></p>
+      </div>
+    </div>
+    <nav class="bg-slate-900/60">
+      <div class="max-w-7xl mx-auto px-4 flex flex-wrap gap-1">
+        <button class="tab-btn active text-sm px-4 py-2 text-white" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="habitaciones">Habitaciones</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="reservas">Reservas</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="pos">POS</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="inventario">Inventario</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="gastos">Gastos</button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <!-- Dashboard -->
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Ventas hoy (Bs)</p>
+          <p class="text-2xl font-bold mt-1" id="dash-ventas-bs">--</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Ventas hoy (USD)</p>
+          <p class="text-2xl font-bold mt-1" id="dash-ventas-usd">--</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Gastos hoy (Bs)</p>
+          <p class="text-2xl font-bold mt-1 text-red-600" id="dash-gastos-bs">--</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Gastos hoy (USD)</p>
+          <p class="text-2xl font-bold mt-1 text-red-600" id="dash-gastos-usd">--</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Pedidos del día</p>
+          <p class="text-2xl font-bold mt-1" id="dash-pedidos">--</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Ocupación</p>
+          <p class="text-2xl font-bold mt-1" id="dash-ocupacion">--</p>
+          <p class="text-xs text-slate-500"><span id="dash-habs-ocupadas">--</span> habitaciones</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Bajo stock</p>
+          <p class="text-2xl font-bold mt-1" id="dash-bajo-stock">--</p>
+        </div>
+      </div>
+      <div class="card p-4 mt-6">
+        <h2 class="text-lg font-semibold mb-3">Productos con stock bajo</h2>
+        <div class="overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Categoría</th>
+                <th>Stock</th>
+                <th>Mínimo</th>
+              </tr>
+            </thead>
+            <tbody id="dash-tabla-bajo-stock"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Habitaciones -->
+    <section id="tab-habitaciones" class="tab-panel">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <h2 class="text-xl font-semibold">Habitaciones</h2>
+        <div class="flex items-center gap-2">
+          <select id="habs-filtro" class="border rounded px-2 py-1 text-sm">
+            <option value="">Todas</option>
+            <option value="disponible">Disponibles</option>
+            <option value="ocupada">Ocupadas</option>
+            <option value="limpieza">Limpieza</option>
+            <option value="mantenimiento">Mantenimiento</option>
+            <option value="bloqueada">Bloqueadas</option>
+          </select>
+          <button id="habs-btn-nuevo" class="px-3 py-1 rounded bg-blue-600 text-white text-sm">Nueva</button>
+        </div>
+      </div>
+      <div id="habs-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3"></div>
+
+      <div id="modal-habitacion" class="modal-backdrop hidden">
+        <form id="form-habitacion" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold">Nueva habitación</h3>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Número</label>
+            <input name="numero" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Tipo</label>
+            <input name="tipo" value="standard" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Precio Bs</label>
+              <input type="number" step="0.01" name="precio_bs" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Precio USD</label>
+              <input type="number" step="0.01" name="precio_usd" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Estado</label>
+            <select name="estado" class="w-full border rounded px-2 py-1">
+              <option value="disponible">disponible</option>
+              <option value="limpieza">limpieza</option>
+              <option value="mantenimiento">mantenimiento</option>
+              <option value="bloqueada">bloqueada</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Notas</label>
+            <input name="notas" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="habs-modal-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Crear</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Reservas -->
+    <section id="tab-reservas" class="tab-panel">
+      <div class="grid lg:grid-cols-3 gap-6">
+        <form id="form-reserva" class="card p-5 space-y-3">
+          <h2 class="text-lg font-semibold">Nuevo check-in</h2>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Habitación</label>
+            <select id="reserva-habitacion" name="habitacion_id" required class="w-full border rounded px-2 py-1"></select>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Huésped</label>
+            <input name="huesped" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Documento</label>
+              <input name="documento" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Teléfono</label>
+              <input name="telefono" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Check-in</label>
+              <input type="date" name="fecha_checkin" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Check-out estimado</label>
+              <input type="date" name="fecha_checkout" required class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Noches</label>
+              <input type="number" name="noches" min="1" value="1" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Tarifa Bs</label>
+              <input type="number" step="0.01" name="tarifa_bs" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Tarifa USD</label>
+              <input type="number" step="0.01" name="tarifa_usd" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <button type="submit" class="w-full px-3 py-2 rounded bg-emerald-600 text-white">Registrar check-in</button>
+        </form>
+        <div class="card p-5 lg:col-span-2">
+          <h2 class="text-lg font-semibold mb-3">Reservas activas</h2>
+          <div class="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Huésped</th>
+                  <th>Hab</th>
+                  <th>Entrada</th>
+                  <th>Salida</th>
+                  <th>Noches</th>
+                  <th>Total</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="reservas-tabla"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="modal-checkout" class="modal-backdrop hidden">
+        <form id="form-checkout" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold">Checkout</h3>
+          <div id="checkout-resumen" class="text-sm space-y-1"></div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Método</label>
+            <select name="metodo_pago" class="w-full border rounded px-2 py-1">
+              <option value="bs">Bolívares</option>
+              <option value="usd">Dólares</option>
+              <option value="mixto">Mixto</option>
+              <option value="transferencia">Transferencia</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Recibido Bs</label>
+              <input type="number" step="0.01" name="monto_bs" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Recibido USD</label>
+              <input type="number" step="0.01" name="monto_usd" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Cuenta banco</label>
+            <select id="checkout-cuenta" name="cuenta_banco_id" class="w-full border rounded px-2 py-1"></select>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Notas</label>
+            <input name="notas" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="checkout-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-emerald-600 text-white rounded">Confirmar checkout</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- POS -->
+    <section id="tab-pos" class="tab-panel">
+      <div class="grid lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2 space-y-4">
+          <div class="card p-4 grid md:grid-cols-4 gap-3 items-end">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Tipo</label>
+              <select id="pos-tipo" class="w-full border rounded px-2 py-1">
+                <option value="restaurante">Restaurante</option>
+                <option value="bar">Bar</option>
+                <option value="habitacion">Habitación</option>
+                <option value="general">General</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Mesa / Ubicación</label>
+              <input id="pos-mesa" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div class="md:col-span-2">
+              <label class="text-xs uppercase text-slate-500">Habitación (cargo)</label>
+              <select id="pos-reserva" class="w-full border rounded px-2 py-1"></select>
+            </div>
+            <div class="md:col-span-4">
+              <input id="pos-busqueda" placeholder="Buscar producto..." class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div id="pos-productos" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3"></div>
+        </div>
+        <div class="space-y-4">
+          <div class="card p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="text-lg font-semibold">Carrito</h2>
+              <button id="pos-btn-vaciar" class="text-xs text-red-600">Vaciar</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Precio</th>
+                    <th>Cantidad</th>
+                    <th>Subtotal</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="pos-carrito"></tbody>
+              </table>
+            </div>
+            <div class="mt-3 border-t pt-3 text-right space-y-1">
+              <p class="text-sm">Total USD: <strong id="pos-total-usd">$ 0.00</strong></p>
+              <p class="text-sm">Total Bs: <strong id="pos-total-bs">Bs 0.00</strong></p>
+              <p class="text-xs text-slate-500" id="pos-tasa">Tasa día: --</p>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-3">
+              <button id="pos-btn-crear" class="px-3 py-2 bg-blue-600 text-white rounded">Crear pedido</button>
+              <button id="pos-btn-cargar" class="px-3 py-2 bg-amber-600 text-white rounded">Cargar a habitación</button>
+            </div>
+          </div>
+          <div class="card p-4 hidden" id="pos-pedido-card">
+            <h3 class="text-base font-semibold mb-2">Pedido activo</h3>
+            <div id="pos-pedido-info" class="text-sm"></div>
+            <button id="pos-btn-pagar" disabled class="mt-3 w-full px-3 py-2 bg-emerald-600 text-white rounded disabled:opacity-50">Cobrar</button>
+          </div>
+          <div class="card p-4">
+            <h3 class="text-base font-semibold mb-2">Pedidos activos</h3>
+            <div class="overflow-x-auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Tipo</th>
+                    <th>Mesa</th>
+                    <th>Total</th>
+                    <th>Estado</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="pos-pedidos-activos"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="modal-pago" class="modal-backdrop hidden">
+        <form id="form-pago" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold">Cobrar pedido</h3>
+          <div id="pago-resumen" class="text-sm space-y-1"></div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Método</label>
+            <select name="metodo_pago" class="w-full border rounded px-2 py-1">
+              <option value="bs">Bolívares</option>
+              <option value="usd">Dólares</option>
+              <option value="mixto">Mixto (Bs + USD)</option>
+              <option value="transferencia">Transferencia</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Recibe Bs</label>
+              <input type="number" step="0.01" name="monto_bs" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Recibe USD</label>
+              <input type="number" step="0.01" name="monto_usd" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Cuenta banco</label>
+            <select id="pago-cuenta" name="cuenta_banco_id" class="w-full border rounded px-2 py-1"></select>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="pago-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-emerald-600 text-white rounded">Confirmar pago</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Inventario -->
+    <section id="tab-inventario" class="tab-panel">
+      <div class="grid lg:grid-cols-3 gap-6">
+        <form id="form-producto" class="card p-5 space-y-3">
+          <h2 class="text-lg font-semibold">Nuevo producto</h2>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Nombre</label>
+            <input name="nombre" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Categoría</label>
+              <input name="categoria" value="general" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Unidad</label>
+              <input name="unidad" value="unidad" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Descripción</label>
+            <input name="descripcion" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Precio Bs</label>
+              <input type="number" step="0.01" name="precio_bs" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Precio USD</label>
+              <input type="number" step="0.01" name="precio_usd" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Costo Bs</label>
+              <input type="number" step="0.01" name="costo_bs" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Stock</label>
+              <input type="number" step="0.01" name="stock_actual" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Stock mínimo</label>
+              <input type="number" step="0.01" name="stock_minimo" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="es_para_venta" checked /> Es para venta directa
+          </label>
+          <button type="submit" class="w-full px-3 py-2 rounded bg-blue-600 text-white">Crear producto</button>
+        </form>
+        <div class="card p-5 lg:col-span-2 space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold">Productos</h2>
+            <select id="inv-filtro-categoria" class="border rounded px-2 py-1 text-sm">
+              <option value="">Todas categorías</option>
+              <option value="bebidas">bebidas</option>
+              <option value="comida">comida</option>
+              <option value="insumo">insumo</option>
+              <option value="general">general</option>
+            </select>
+          </div>
+          <div class="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Categoría</th>
+                  <th>Precio</th>
+                  <th>Costo</th>
+                  <th>Stock</th>
+                  <th>Mínimo</th>
+                  <th>Venta</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="inv-tabla-productos"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-3 gap-6 mt-6">
+        <form id="form-movimiento" class="card p-5 space-y-3">
+          <h2 class="text-lg font-semibold">Movimiento de stock</h2>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Producto</label>
+            <select id="mov-producto" name="producto_id" required class="w-full border rounded px-2 py-1"></select>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Tipo</label>
+              <select name="tipo" class="w-full border rounded px-2 py-1">
+                <option value="entrada">Entrada</option>
+                <option value="salida">Salida</option>
+                <option value="ajuste">Ajuste</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Cantidad</label>
+              <input type="number" step="0.01" name="cantidad" required class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Motivo</label>
+            <input name="motivo" class="w-full border rounded px-2 py-1" />
+          </div>
+          <button type="submit" class="w-full px-3 py-2 rounded bg-blue-600 text-white">Registrar movimiento</button>
+        </form>
+        <div class="card p-5 lg:col-span-2">
+          <h2 class="text-lg font-semibold mb-3">Últimos movimientos</h2>
+          <div class="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Producto</th>
+                  <th>Tipo</th>
+                  <th>Cantidad</th>
+                  <th>Stock</th>
+                  <th>Motivo</th>
+                </tr>
+              </thead>
+              <tbody id="inv-tabla-movimientos"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Gastos -->
+    <section id="tab-gastos" class="tab-panel">
+      <div class="grid lg:grid-cols-3 gap-6">
+        <form id="form-gasto" class="card p-5 space-y-3">
+          <h2 class="text-lg font-semibold">Registrar gasto</h2>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Fecha</label>
+            <input id="gasto-fecha" type="date" name="fecha" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Categoría</label>
+            <select id="gasto-categoria" name="categoria_id" required class="w-full border rounded px-2 py-1"></select>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Descripción</label>
+            <input name="descripcion" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Monto Bs</label>
+              <input type="number" step="0.01" name="monto_bs" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Monto USD</label>
+              <input type="number" step="0.01" name="monto_usd" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Banco</label>
+            <select id="gasto-cuenta" name="cuenta_banco_id" class="w-full border rounded px-2 py-1"></select>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Beneficiario</label>
+              <input name="beneficiario" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Referencia</label>
+              <input name="referencia" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Notas</label>
+            <input name="notas" class="w-full border rounded px-2 py-1" />
+          </div>
+          <button type="submit" class="w-full px-3 py-2 rounded bg-red-600 text-white">Guardar gasto</button>
+        </form>
+        <div class="card p-5 lg:col-span-2 space-y-4">
+          <h2 class="text-lg font-semibold">Últimos gastos</h2>
+          <div class="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Categoría</th>
+                  <th>Descripción</th>
+                  <th>Bs</th>
+                  <th>USD</th>
+                  <th>Beneficiario</th>
+                  <th>Referencia</th>
+                </tr>
+              </thead>
+              <tbody id="gastos-tabla"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="grid lg:grid-cols-3 gap-6 mt-6">
+        <form id="form-categoria" class="card p-5 space-y-3">
+          <h2 class="text-lg font-semibold">Nueva categoría</h2>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Nombre</label>
+            <input name="nombre" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Tipo</label>
+            <input name="tipo" value="operativo" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Descripción</label>
+            <input name="descripcion" class="w-full border rounded px-2 py-1" />
+          </div>
+          <button type="submit" class="w-full px-3 py-2 rounded bg-blue-600 text-white">Crear categoría</button>
+        </form>
+        <div class="card p-5 lg:col-span-2">
+          <h2 class="text-lg font-semibold mb-3">Categorías</h2>
+          <div class="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Tipo</th>
+                  <th>Descripción</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-categorias"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50"></div>
+
+  <script type="module">
+    import { loadDashboard } from "/static/js/dashboard.js";
+    import { initHabitaciones } from "/static/js/habitaciones.js";
+    import { initReservas } from "/static/js/reservas.js";
+    import { initPedidos } from "/static/js/pedidos.js";
+    import { initInventario } from "/static/js/inventario.js";
+    import { initGastos } from "/static/js/gastos.js";
+
+    const tabs = document.querySelectorAll(".tab-btn");
+    const panels = document.querySelectorAll(".tab-panel");
+    const loaders = {
+      dashboard: () => loadDashboard(),
+      habitaciones: () => initHabitaciones(),
+      reservas: () => initReservas(),
+      pos: () => initPedidos(),
+      inventario: () => initInventario(),
+      gastos: () => initGastos(),
+    };
+    const loaded = new Set();
+
+    async function activate(tab) {
+      tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+      panels.forEach((p) => p.classList.toggle("active", p.id === `tab-${tab}`));
+      if (!loaded.has(tab) && loaders[tab]) {
+        loaded.add(tab);
+        try { await loaders[tab](); } catch (err) { console.error(err); }
+      } else if (loaders[tab] && tab === "dashboard") {
+        loaders[tab]();
+      }
+    }
+
+    tabs.forEach((btn) => btn.addEventListener("click", () => activate(btn.dataset.tab)));
+
+    activate("dashboard");
+  </script>
+</body>
+</html>
