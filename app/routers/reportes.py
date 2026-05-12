@@ -30,7 +30,10 @@ from app.schemas import (
     ResumenDia,
     TransaccionResumen,
     VentasArea,
+    VentasAreaConMetodos,
+    VentasMetodo,
     VentasPorArea,
+    VentasPorAreaConMetodos,
 )
 from app.services.tasa_service import obtener_tasa_dia
 
@@ -294,6 +297,162 @@ def ultimas_transacciones(
         raise HTTPException(
             status_code=500,
             detail=f"Error generando transacciones recientes: {exc}",
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Ventas del día por área con desglose por método de pago
+# ---------------------------------------------------------------------------
+METODOS_NOMBRES: dict[str, str] = {
+    "efectivo_usd": "💵 Efectivo USD",
+    "efectivo_bs": "💴 Efectivo Bs",
+    "transferencia_bs": "💳 Transferencia Bs",
+    "pagomovil_bs": "📱 Pago Móvil Bs",
+    "mixto": "💵+💴 Mixto",
+    "otros": "Otros",
+}
+
+# Orden estable para serializar (el frontend espera este orden).
+METODOS_ORDEN: tuple[str, ...] = (
+    "efectivo_usd",
+    "efectivo_bs",
+    "transferencia_bs",
+    "pagomovil_bs",
+    "mixto",
+)
+
+
+def _nuevo_area_acumulador() -> dict:
+    """Estructura interna para acumular USD/Bs por método dentro de un área."""
+    return {
+        "total_usd": Decimal("0"),
+        "total_bs": Decimal("0"),
+        "metodos": {clave: {"usd": Decimal("0"), "bs": Decimal("0")} for clave in METODOS_ORDEN},
+    }
+
+
+def _sumar_a_area(area_acc: dict, etiqueta: str, usd: Decimal, bs: Decimal) -> None:
+    if etiqueta not in area_acc["metodos"]:
+        area_acc["metodos"][etiqueta] = {"usd": Decimal("0"), "bs": Decimal("0")}
+    area_acc["metodos"][etiqueta]["usd"] += usd
+    area_acc["metodos"][etiqueta]["bs"] += bs
+    area_acc["total_usd"] += usd
+    area_acc["total_bs"] += bs
+
+
+def _materializar_area(area_acc: dict) -> VentasAreaConMetodos:
+    metodos_out: dict[str, VentasMetodo] = {}
+    for clave, monto in area_acc["metodos"].items():
+        usd = monto["usd"].quantize(Decimal("0.01"))
+        bs = monto["bs"].quantize(Decimal("0.01"))
+        # Sólo exponemos los métodos que realmente tienen movimiento, para
+        # que el frontend pinte únicamente las líneas relevantes.
+        if usd == 0 and bs == 0:
+            continue
+        metodos_out[clave] = VentasMetodo(
+            label=METODOS_NOMBRES.get(clave, clave),
+            usd=usd,
+            bs=bs,
+        )
+    return VentasAreaConMetodos(
+        total_usd=area_acc["total_usd"].quantize(Decimal("0.01")),
+        total_bs=area_acc["total_bs"].quantize(Decimal("0.01")),
+        metodos=metodos_out,
+    )
+
+
+@router.get(
+    "/ventas-por-area-con-metodos",
+    response_model=VentasPorAreaConMetodos,
+    dependencies=[_REPORTES_OPERATIVO],
+)
+def ventas_por_area_con_metodos(
+    fecha: Optional[date_type] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Ventas del día agrupadas por área y método de pago.
+
+    * **Habitaciones** = reservas cerradas hoy (``total_final_*`` íntegro).
+    * **Bar / Cocina / Piscina** = pedidos pagados hoy, prorrateando ``pagado_*``
+      por el peso de cada detalle. Los detalles con producto de categoría
+      "Piscina" se reasignan al bucket ``piscina`` independientemente del área
+      del pedido o del producto.
+    """
+    fecha_objetivo = fecha or today()
+    try:
+        habitaciones = _nuevo_area_acumulador()
+        bar = _nuevo_area_acumulador()
+        cocina = _nuevo_area_acumulador()
+        piscina = _nuevo_area_acumulador()
+
+        # ---- Habitaciones (reservas cerradas hoy) ----
+        reservas = (
+            db.query(Reserva)
+            .filter(Reserva.estado == "cerrada")
+            .filter(Reserva.fecha_checkout_real == fecha_objetivo)
+            .all()
+        )
+        for r in reservas:
+            usd = Decimal(r.total_final_usd or 0)
+            bs = Decimal(r.total_final_bs or 0)
+            if usd == 0 and bs == 0:
+                continue
+            etiqueta = _clasificar_metodo(r.metodo_pago, usd, bs)
+            _sumar_a_area(habitaciones, etiqueta, usd, bs)
+
+        # ---- Pedidos pagados hoy → bar / cocina / piscina ----
+        pedidos = (
+            db.query(Pedido)
+            .options(joinedload(Pedido.detalles).joinedload(DetallePedido.producto))
+            .filter(Pedido.estado.in_(["pagado", "cargado"]))
+            .filter(func.date(Pedido.updated_at) == fecha_objetivo)
+            .all()
+        )
+        for p in pedidos:
+            pagado_usd = Decimal(p.pagado_usd or 0)
+            pagado_bs = Decimal(p.pagado_bs or 0)
+            if pagado_usd == 0 and pagado_bs == 0:
+                continue
+            etiqueta = _clasificar_metodo(p.metodo_pago, pagado_usd, pagado_bs)
+            base = sum(
+                (Decimal(d.subtotal_usd or 0) for d in (p.detalles or [])),
+                Decimal("0"),
+            )
+            if not (p.detalles):
+                # Sin detalles: no podemos atribuir a área. Lo dejamos como cocina
+                # por defecto para no perder visibilidad.
+                _sumar_a_area(cocina, etiqueta, pagado_usd, pagado_bs)
+                continue
+            for det in p.detalles:
+                sub_usd = Decimal(det.subtotal_usd or 0)
+                if base > 0:
+                    peso = sub_usd / base
+                    aporte_usd = (pagado_usd * peso).quantize(Decimal("0.01"))
+                    aporte_bs = (pagado_bs * peso).quantize(Decimal("0.01"))
+                else:
+                    aporte_usd = Decimal("0")
+                    aporte_bs = Decimal("0")
+                producto = getattr(det, "producto", None)
+                categoria = (producto.categoria if producto else "") or ""
+                area = (producto.area if producto else "general") or "general"
+                if categoria.strip().lower() == "piscina":
+                    _sumar_a_area(piscina, etiqueta, aporte_usd, aporte_bs)
+                elif area.lower() == "bar":
+                    _sumar_a_area(bar, etiqueta, aporte_usd, aporte_bs)
+                else:
+                    _sumar_a_area(cocina, etiqueta, aporte_usd, aporte_bs)
+
+        return VentasPorAreaConMetodos(
+            fecha=fecha_objetivo,
+            habitaciones=_materializar_area(habitaciones),
+            bar=_materializar_area(bar),
+            cocina=_materializar_area(cocina),
+            piscina=_materializar_area(piscina),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error calculando ventas por área con métodos: {exc}",
         ) from exc
 
 

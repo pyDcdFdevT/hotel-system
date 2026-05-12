@@ -568,6 +568,28 @@ class HistorialTransacciones(BaseModel):
     items: List[TransaccionResumen]
 
 
+class VentasMetodo(BaseModel):
+    """Aporte de un método de pago dentro de un área."""
+
+    label: str
+    usd: Decimal = Decimal("0")
+    bs: Decimal = Decimal("0")
+
+
+class VentasAreaConMetodos(BaseModel):
+    total_usd: Decimal = Decimal("0")
+    total_bs: Decimal = Decimal("0")
+    metodos: dict[str, VentasMetodo] = {}
+
+
+class VentasPorAreaConMetodos(BaseModel):
+    fecha: date
+    habitaciones: VentasAreaConMetodos
+    bar: VentasAreaConMetodos
+    cocina: VentasAreaConMetodos
+    piscina: VentasAreaConMetodos
+
+
 # ---------------------------------------------------------------------------
 # Auth / Usuarios
 # ---------------------------------------------------------------------------

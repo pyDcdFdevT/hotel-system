@@ -141,6 +141,50 @@ body {
   background-color: #eef2ff;
 }
 
+.area-card {
+  border: 1px solid var(--color-border);
+  border-radius: 0.6rem;
+  background-color: #ffffff;
+  padding: 0.9rem 1rem;
+  border-left-width: 4px;
+}
+.area-card .area-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.area-card .area-title h3 {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.area-card .area-totales {
+  font-size: 0.8rem;
+  color: #475569;
+}
+.area-card ul.area-metodos {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: #1f2937;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.area-card ul.area-metodos li {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dashed #e2e8f0;
+  padding: 0.1rem 0;
+}
+.area-card ul.area-metodos li:last-child { border-bottom: none; }
+.area-card.empty { opacity: 0.7; }
+
+.area-card.area-habitaciones { border-left-color: #f59e0b; }
+.area-card.area-bar          { border-left-color: #a855f7; }
+.area-card.area-cocina       { border-left-color: #10b981; }
+.area-card.area-piscina      { border-left-color: #0ea5e9; }
+
 .badge {
   display: inline-flex;
   align-items: center;

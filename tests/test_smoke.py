@@ -541,6 +541,78 @@ def test_ventas_por_area(client):
     assert float(data["total_usd"]) >= 18.0
 
 
+def test_ventas_por_area_con_metodos(client):
+    """El dashboard agrupa ventas del día por área y método de pago."""
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+    tequenos = next(p for p in productos if p["nombre"] == "Tequeños")
+
+    pedido_bar = client.post(
+        "/api/pedidos/",
+        json={"tipo": "bar", "items": [{"producto_id": cerveza["id"], "cantidad": 1}]},
+    ).json()
+    client.post(
+        f"/api/pedidos/{pedido_bar['id']}/pagar",
+        json={"metodo_pago": "usd", "monto_usd": 1.5},
+    )
+
+    pedido_coc = client.post(
+        "/api/pedidos/",
+        json={"tipo": "restaurante", "items": [{"producto_id": tequenos["id"], "cantidad": 1}]},
+    ).json()
+    pago_coc = client.post(
+        f"/api/pedidos/{pedido_coc['id']}/pagar",
+        json={"metodo_pago": "transferencia", "tasa_tipo": "bcv", "monto_bs": 3000},
+    )
+    assert pago_coc.status_code == 200, pago_coc.text
+
+    # Habitación cerrada hoy en efectivo USD para que aparezca en 'habitaciones'.
+    habs = client.get("/api/habitaciones/").json()
+    hab = next(h for h in habs if h["estado"] == "disponible" and h["numero"] == "111")
+    client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={"huesped": "Dashboard Tester", "noches": 1},
+    )
+    cierre = client.post(
+        f"/api/habitaciones/{hab['id']}/checkout",
+        json={"opcion_pago": "efectivo_usd"},
+    )
+    assert cierre.status_code == 200, cierre.text
+
+    resp = client.get("/api/reportes/ventas-por-area-con-metodos")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    for clave in ("habitaciones", "bar", "cocina", "piscina"):
+        assert clave in data
+        assert "total_usd" in data[clave]
+        assert "total_bs" in data[clave]
+        assert "metodos" in data[clave]
+
+    bar = data["bar"]
+    assert "efectivo_usd" in bar["metodos"], bar["metodos"]
+    assert float(bar["metodos"]["efectivo_usd"]["usd"]) >= 1.5
+    assert "💵" in bar["metodos"]["efectivo_usd"]["label"]
+
+    cocina = data["cocina"]
+    assert "transferencia_bs" in cocina["metodos"], cocina["metodos"]
+    assert float(cocina["metodos"]["transferencia_bs"]["bs"]) >= 3000
+
+    # Habitaciones: cierre USD del check-out figura en efectivo_usd.
+    habitaciones = data["habitaciones"]
+    assert float(habitaciones["total_usd"]) >= 20.0
+    assert "efectivo_usd" in habitaciones["metodos"]
+
+
+def test_ventas_por_area_con_metodos_mesero_accede(anon_client):
+    """Mesero puede consultar el endpoint (lo usa la UI Inicio si llegara a verla)."""
+    token = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = anon_client.get(
+        "/api/reportes/ventas-por-area-con-metodos", headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+
+
 def test_checkin_hora_ingreso(client):
     """El check-in acepta hora_ingreso opcional y la persiste en la reserva."""
     habs = client.get("/api/habitaciones/").json()

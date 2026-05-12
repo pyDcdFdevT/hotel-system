@@ -27,7 +27,24 @@ const els = {
   areaTotalBs: document.getElementById("dash-area-total-bs"),
   tablaTx: document.getElementById("dash-tabla-transacciones"),
   txActualizado: document.getElementById("dash-tx-actualizado"),
+  areasMetodos: document.getElementById("dash-areas-metodos"),
+  areasActualizado: document.getElementById("dash-areas-actualizado"),
 };
+
+const AREA_META = {
+  habitaciones: { titulo: "🏨 Habitaciones", clase: "area-habitaciones" },
+  bar: { titulo: "🍸 Bar", clase: "area-bar" },
+  cocina: { titulo: "🍳 Cocina", clase: "area-cocina" },
+  piscina: { titulo: "🏊 Piscina", clase: "area-piscina" },
+};
+
+const METODOS_ORDEN = [
+  "efectivo_usd",
+  "efectivo_bs",
+  "transferencia_bs",
+  "pagomovil_bs",
+  "mixto",
+];
 
 const TX_BADGES = {
   checkout: { etiqueta: "Check-out", clase: "badge-info" },
@@ -60,18 +77,76 @@ export async function loadDashboard() {
 
     renderVentasArea(ventasArea);
     await loadBajoStockTabla();
+    await loadVentasPorAreaConMetodos();
     await loadUltimasTransacciones();
-    iniciarPollingTransacciones();
+    iniciarPolling();
   } catch (error) {
     showToast(`Error cargando dashboard: ${error.message}`, "error");
   }
 }
 
-function iniciarPollingTransacciones() {
+function iniciarPolling() {
   if (txTimer) return;
   txTimer = setInterval(() => {
     loadUltimasTransacciones().catch(() => {});
+    loadVentasPorAreaConMetodos().catch(() => {});
   }, 30_000);
+}
+
+export async function loadVentasPorAreaConMetodos() {
+  if (!els.areasMetodos) return;
+  try {
+    const data = await get("/reportes/ventas-por-area-con-metodos");
+    const areas = ["habitaciones", "bar", "cocina", "piscina"];
+    els.areasMetodos.innerHTML = areas
+      .map((clave) => renderAreaCard(clave, data[clave]))
+      .join("");
+    if (els.areasActualizado) {
+      els.areasActualizado.textContent = `Actualizado ${formatFechaHoraVe(new Date())}`;
+    }
+  } catch (error) {
+    els.areasMetodos.innerHTML = `<div class="text-sm text-red-600">${error.message}</div>`;
+  }
+}
+
+function renderAreaCard(clave, datos) {
+  const meta = AREA_META[clave] || { titulo: clave, clase: "" };
+  const totalUsd = Number(datos?.total_usd || 0);
+  const totalBs = Number(datos?.total_bs || 0);
+  const vacia = totalUsd === 0 && totalBs === 0;
+  const metodos = datos?.metodos || {};
+  // Ordenamos los métodos según METODOS_ORDEN; cualquier extra (otros) al final.
+  const claves = [
+    ...METODOS_ORDEN.filter((k) => metodos[k]),
+    ...Object.keys(metodos).filter((k) => !METODOS_ORDEN.includes(k)),
+  ];
+  const filas = claves
+    .map((k) => {
+      const m = metodos[k];
+      const usd = Number(m.usd || 0);
+      const bs = Number(m.bs || 0);
+      const partes = [];
+      if (usd > 0) partes.push(formatUsd(usd));
+      if (bs > 0) partes.push(formatBs(bs));
+      return `<li>
+        <span>${m.label || k}</span>
+        <span class="font-medium">${partes.join(" · ") || "-"}</span>
+      </li>`;
+    })
+    .join("");
+  return `
+    <div class="area-card ${meta.clase} ${vacia ? "empty" : ""}">
+      <div class="area-title">
+        <h3>${meta.titulo}</h3>
+        <span class="font-semibold">${formatUsd(totalUsd)} · ${formatBs(totalBs)}</span>
+      </div>
+      ${
+        vacia
+          ? `<p class="area-totales">Sin ventas hoy</p>`
+          : `<ul class="area-metodos">${filas}</ul>`
+      }
+    </div>
+  `;
 }
 
 async function loadUltimasTransacciones() {
