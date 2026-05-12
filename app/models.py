@@ -159,6 +159,10 @@ class Reserva(Base):
     recarga_extra_bs = Column(Numeric(10, 2), default=0, nullable=False)
     # Método de pago aplicado al cerrar la reserva (efectivo / transferencia / ...).
     metodo_pago = Column(String(30), nullable=True)
+    # Pago anticipado al hacer check-in (estadía adelantada).
+    pagado_parcial_usd = Column(Numeric(10, 2), default=0, nullable=False)
+    pagado_parcial_bs = Column(Numeric(12, 2), default=0, nullable=False)
+    estado_pago = Column(String(20), default="pendiente", nullable=False, index=True)
     # Timestamps en hora local Venezuela (America/Caracas).
     created_at = Column(DateTime, default=caracas_now, nullable=False)
     updated_at = Column(DateTime, default=caracas_now, onupdate=caracas_now, nullable=False)

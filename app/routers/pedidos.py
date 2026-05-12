@@ -26,7 +26,10 @@ from app.schemas import (
     PedidoOut,
     PedidoPago,
 )
-from app.services.inventario_service import descontar_inventario_por_receta
+from app.services.inventario_service import (
+    descontar_inventario_por_receta,
+    restaurar_inventario_por_receta,
+)
 from app.services.tasa_service import obtener_tasa_bcv, obtener_tasa_dia
 
 
@@ -477,15 +480,63 @@ def cargar_a_habitacion(
         raise HTTPException(status_code=500, detail=f"Error cargando a habitación: {exc}") from exc
 
 
+def _cancelar_pedido_interno(db: Session, pedido_id: int) -> Pedido:
+    """Marca el pedido como cancelado y devuelve el stock consumido.
+
+    Sólo cancela pedidos en estado ``abierto``. Para cada detalle, devuelve
+    el inventario que se descontó al crearlo (sea ingrediente vía receta o
+    el propio producto).
+    """
+    pedido = _cargar_pedido(db, pedido_id)
+    if pedido.estado != "abierto":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sólo se pueden cancelar pedidos abiertos (estado actual: {pedido.estado})",
+        )
+    for detalle in (pedido.detalles or []):
+        try:
+            restaurar_inventario_por_receta(
+                db,
+                producto_id=detalle.producto_id,
+                cantidad=Decimal(detalle.cantidad or 0),
+                motivo=f"Cancelación pedido #{pedido.id}",
+                referencia=f"pedido:{pedido.id}",
+            )
+        except ValueError:
+            # Si la cantidad era 0 o el producto fue eliminado, seguimos.
+            continue
+    pedido.estado = "cancelado"
+    pedido.updated_at = utc_now()
+    return pedido
+
+
+@router.delete(
+    "/{pedido_id}/cancelar",
+    dependencies=[Depends(require_roles("admin", "mesero"))],
+)
+def cancelar_pedido(pedido_id: int, db: Session = Depends(get_db)):
+    """Cancela un pedido abierto y devuelve el stock descontado."""
+    try:
+        pedido = _cancelar_pedido_interno(db, pedido_id)
+        db.commit()
+        return {"success": True, "pedido_id": pedido.id, "estado": pedido.estado}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error cancelando pedido: {exc}") from exc
+
+
 @router.delete("/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
 def cancelar(pedido_id: int, db: Session = Depends(get_db)):
-    pedido = _cargar_pedido(db, pedido_id)
-    if pedido.estado not in {"abierto"}:
-        raise HTTPException(status_code=400, detail="Solo se pueden cancelar pedidos abiertos")
+    """Alias legacy: equivalente a /cancelar pero accesible para cualquier usuario autenticado."""
     try:
-        pedido.estado = "cancelado"
-        pedido.updated_at = utc_now()
+        _cancelar_pedido_interno(db, pedido_id)
         db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error cancelando pedido: {exc}") from exc

@@ -179,6 +179,53 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
             tasa = obtener_tasa_bcv(db)
             tarifa_bs = (tarifa_usd * Decimal(tasa)).quantize(Decimal("0.01"))
 
+        # ---- Pago anticipado opcional ----
+        pagado_usd = Decimal("0")
+        pagado_bs = Decimal("0")
+        estado_pago = "pendiente"
+        metodo_pago_reserva: Optional[str] = None
+        if data.pago_anticipado:
+            moneda = (data.moneda_pago or "usd").lower().strip()
+            if moneda not in {"usd", "bs"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="moneda_pago inv?lida para pago anticipado. Use 'usd' o 'bs'.",
+                )
+            metodo_pago_reserva = (data.metodo_pago or "efectivo").lower().strip()
+
+            tasa_tipo = (data.tasa_tipo or "bcv").lower().strip()
+            if tasa_tipo not in {"bcv", "paralelo"}:
+                tasa_tipo = "bcv"
+            tasa_aplicada = Decimal(obtener_tasa_dia(db, tipo=tasa_tipo))
+
+            recibido_usd = Decimal(data.monto_recibido_usd or 0).quantize(Decimal("0.01"))
+            recibido_bs = Decimal(data.monto_recibido_bs or 0).quantize(Decimal("0.01"))
+            # Si no especific? montos, asumimos que cubre el total de estad?a.
+            total_estadia_usd = tarifa_usd
+            if moneda == "usd":
+                if recibido_usd == 0 and recibido_bs == 0:
+                    recibido_usd = total_estadia_usd
+                pagado_usd = recibido_usd
+                pagado_bs = Decimal("0")
+            else:  # bs
+                if recibido_usd == 0 and recibido_bs == 0:
+                    recibido_bs = (total_estadia_usd * tasa_aplicada).quantize(Decimal("0.01"))
+                pagado_bs = recibido_bs
+                pagado_usd = Decimal("0")
+
+            # Para estado: comparamos el equivalente abonado en USD vs total estad?a.
+            equivalente_usd_abonado = pagado_usd + (
+                (pagado_bs / tasa_aplicada).quantize(Decimal("0.01"))
+                if tasa_aplicada > 0
+                else Decimal("0")
+            )
+            if equivalente_usd_abonado + Decimal("0.01") >= total_estadia_usd:
+                estado_pago = "pagado"
+            elif equivalente_usd_abonado > 0:
+                estado_pago = "parcial"
+            else:
+                estado_pago = "pendiente"
+
         reserva = Reserva(
             habitacion_id=habitacion.id,
             huesped=data.huesped,
@@ -194,6 +241,10 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
             vehiculo_color=(data.vehiculo_color or None),
             vehiculo_placa=(data.vehiculo_placa or None),
             hora_ingreso=(data.hora_ingreso or None),
+            pagado_parcial_usd=pagado_usd,
+            pagado_parcial_bs=pagado_bs,
+            estado_pago=estado_pago,
+            metodo_pago=metodo_pago_reserva,
         )
         db.add(reserva)
 
@@ -348,6 +399,26 @@ def _calcular_preview(
     total_usd = (tarifa_usd + consumos_usd + recarga_extra_usd).quantize(Decimal("0.01"))
     total_bs = (total_usd * tasa_aplicada).quantize(Decimal("0.01"))
 
+    # Pago anticipado abonado en el check-in.
+    pagado_parcial_usd = (
+        Decimal(reserva.pagado_parcial_usd or 0) if reserva else Decimal("0")
+    )
+    pagado_parcial_bs = (
+        Decimal(reserva.pagado_parcial_bs or 0) if reserva else Decimal("0")
+    )
+    estado_pago = (reserva.estado_pago if reserva else None) or "pendiente"
+
+    # Convertimos lo abonado en Bs a USD para restarlo del total expresado en USD.
+    abonado_usd_eq = pagado_parcial_usd + (
+        (pagado_parcial_bs / tasa_aplicada).quantize(Decimal("0.01"))
+        if tasa_aplicada > 0
+        else Decimal("0")
+    )
+    pendiente_usd = (total_usd - abonado_usd_eq).quantize(Decimal("0.01"))
+    if pendiente_usd < 0:
+        pendiente_usd = Decimal("0")
+    pendiente_bs = (pendiente_usd * tasa_aplicada).quantize(Decimal("0.01"))
+
     return HabitacionCheckoutPreview(
         habitacion_id=habitacion.id,
         numero=habitacion.numero,
@@ -368,6 +439,11 @@ def _calcular_preview(
         horas_extra=horas_extra,
         recarga_extra_usd=recarga_extra_usd,
         recarga_extra_bs=recarga_extra_bs,
+        pagado_parcial_usd=pagado_parcial_usd,
+        pagado_parcial_bs=pagado_parcial_bs,
+        estado_pago=estado_pago,
+        pendiente_usd=pendiente_usd,
+        pendiente_bs=pendiente_bs,
     )
 
 
@@ -463,6 +539,10 @@ def checkout(
             db, habitacion, tasa_tipo=tasa_tipo, hora_salida=data.hora_salida
         )
 
+        # S?lo cobramos el saldo pendiente (total - pago anticipado).
+        cobro_usd = preview.pendiente_usd
+        cobro_bs = preview.pendiente_bs
+
         # Reparto del cobro entre USD y Bs seg?n la moneda elegida:
         #   - usd  ? todo en d?lares (sin tasa).
         #   - bs   ? todo en bol?vares (con tasa BCV o paralelo).
@@ -470,15 +550,15 @@ def checkout(
         #             monto_recibido_usd / monto_recibido_bs; lo no cubierto en
         #             USD se completa con Bs a la tasa aplicada.
         if moneda_pago == "usd":
-            pagado_usd_total = preview.total_usd
+            pagado_usd_total = cobro_usd
             pagado_bs_total = Decimal("0")
         elif moneda_pago == "bs":
             pagado_usd_total = Decimal("0")
-            pagado_bs_total = preview.total_bs
+            pagado_bs_total = cobro_bs
         else:  # mixto
             pagado_usd_total = Decimal(data.monto_recibido_usd or 0).quantize(Decimal("0.01"))
             # Lo que falta en USD se cobra en Bs a la tasa aplicada.
-            faltante_usd = (preview.total_usd - pagado_usd_total).quantize(Decimal("0.01"))
+            faltante_usd = (cobro_usd - pagado_usd_total).quantize(Decimal("0.01"))
             if faltante_usd < 0:
                 faltante_usd = Decimal("0")
             pagado_bs_total = (faltante_usd * preview.tasa_aplicada).quantize(Decimal("0.01"))
@@ -514,13 +594,19 @@ def checkout(
             reserva.estado = "cerrada"
             reserva.total_consumos_bs = preview.consumos_bs
             reserva.total_consumos_usd = preview.consumos_usd
-            reserva.total_final_bs = pagado_bs_total
-            reserva.total_final_usd = pagado_usd_total
+            # total_final_* = anticipo + cobro del check-out (lo realmente percibido).
+            reserva.total_final_usd = (
+                Decimal(preview.pagado_parcial_usd or 0) + pagado_usd_total
+            ).quantize(Decimal("0.01"))
+            reserva.total_final_bs = (
+                Decimal(preview.pagado_parcial_bs or 0) + pagado_bs_total
+            ).quantize(Decimal("0.01"))
             reserva.hora_salida = (data.hora_salida or HORA_SALIDA_ESTANDAR)
             reserva.horas_extra = int(preview.horas_extra or 0)
             reserva.recarga_extra_usd = preview.recarga_extra_usd
             reserva.recarga_extra_bs = preview.recarga_extra_bs
             reserva.metodo_pago = metodo_pago
+            reserva.estado_pago = "pagado"
             reserva.updated_at = ahora
 
         habitacion.estado = "limpieza"
@@ -530,8 +616,11 @@ def checkout(
         preview_resp = preview.model_copy(
             update={
                 "tasa_tipo": tasa_tipo,
-                "total_usd": pagado_usd_total if moneda_pago != "bs" else preview.total_usd,
-                "total_bs": pagado_bs_total if moneda_pago != "usd" else preview.total_bs,
+                # Devolvemos al frontend el monto efectivamente cobrado ahora
+                # (excluyendo el anticipo) para que pinte el ticket correctamente.
+                "total_usd": pagado_usd_total if moneda_pago != "bs" else cobro_usd,
+                "total_bs": pagado_bs_total if moneda_pago != "usd" else cobro_bs,
+                "estado_pago": "pagado",
             }
         )
         return preview_resp

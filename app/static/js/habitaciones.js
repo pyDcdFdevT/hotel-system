@@ -55,6 +55,15 @@ const els = {
   checkoutMixtoUsd: document.getElementById("checkout-mixto-usd"),
   checkoutMixtoBs: document.getElementById("checkout-mixto-bs"),
   checkoutHora: document.getElementById("checkout-hora"),
+
+  // Sub-formulario "pago anticipado" del check-in.
+  checkinPagoDetalle: document.getElementById("checkin-pago-detalle"),
+  checkinPagoMoneda: document.getElementById("checkin-pago-moneda"),
+  checkinPagoUsd: document.getElementById("checkin-pago-usd"),
+  checkinPagoBs: document.getElementById("checkin-pago-bs"),
+  checkinPagoUsdRow: document.getElementById("checkin-pago-usd-row"),
+  checkinPagoBsRow: document.getElementById("checkin-pago-bs-row"),
+  checkinSubmit: document.getElementById("checkin-submit"),
 };
 
 // Mapeo opción → {moneda, metodo} (espejo del backend).
@@ -88,6 +97,12 @@ export async function initHabitaciones() {
           e.target.id === "checkin-tasa-tipo"
         ) {
           recalcCheckin();
+        }
+        if (e.target.name === "pago_anticipado") {
+          actualizarVisibilidadPagoAnticipado();
+        }
+        if (e.target.id === "checkin-pago-moneda") {
+          actualizarVisibilidadPagoAnticipado();
         }
       }),
     );
@@ -268,6 +283,14 @@ function abrirCheckin(habId) {
   );
   if (inputIn && !inputIn.value) inputIn.value = hoyIso;
   if (inputOut && !inputOut.value) inputOut.value = mananaIso;
+  // Reseteamos el sub-bloque de pago anticipado (oculto por defecto).
+  const radio = els.formCheckin?.querySelector(
+    'input[name="pago_anticipado"][value="0"]',
+  );
+  if (radio) radio.checked = true;
+  if (els.checkinPagoUsd) els.checkinPagoUsd.value = 0;
+  if (els.checkinPagoBs) els.checkinPagoBs.value = 0;
+  actualizarVisibilidadPagoAnticipado();
   els.modalCheckin.classList.remove("hidden");
   recalcCheckin();
 }
@@ -330,10 +353,36 @@ function cerrarCheckin() {
   els.modalCheckin?.classList.add("hidden");
 }
 
+function pagoAnticipadoActivo() {
+  const radio = els.formCheckin?.querySelector(
+    'input[name="pago_anticipado"]:checked',
+  );
+  return radio?.value === "1";
+}
+
+function actualizarVisibilidadPagoAnticipado() {
+  const activo = pagoAnticipadoActivo();
+  if (els.checkinPagoDetalle) {
+    els.checkinPagoDetalle.classList.toggle("hidden", !activo);
+  }
+  if (els.checkinSubmit) {
+    els.checkinSubmit.textContent = activo
+      ? "Check-in y pagar"
+      : "Solo check-in";
+  }
+  // Mostrar input USD vs Bs según moneda seleccionada.
+  const moneda = els.checkinPagoMoneda?.value || "usd";
+  if (els.checkinPagoUsdRow)
+    els.checkinPagoUsdRow.classList.toggle("hidden", moneda !== "usd");
+  if (els.checkinPagoBsRow)
+    els.checkinPagoBsRow.classList.toggle("hidden", moneda !== "bs");
+}
+
 async function confirmarCheckin(event) {
   event.preventDefault();
   const formData = new FormData(els.formCheckin);
   const habId = Number(formData.get("habitacion_id"));
+  const pagoAnticipado = pagoAnticipadoActivo();
   const payload = {
     huesped: formData.get("huesped")?.toString().trim(),
     documento: formData.get("documento")?.toString() || null,
@@ -347,17 +396,28 @@ async function confirmarCheckin(event) {
     vehiculo_color: formData.get("vehiculo_color")?.toString().trim() || null,
     vehiculo_placa: formData.get("vehiculo_placa")?.toString().trim() || null,
     hora_ingreso: formData.get("hora_ingreso")?.toString() || null,
+    pago_anticipado: pagoAnticipado,
   };
+  if (pagoAnticipado) {
+    payload.moneda_pago = formData.get("moneda_pago") || "usd";
+    payload.metodo_pago = formData.get("metodo_pago") || "efectivo";
+    payload.monto_recibido_usd = Number(formData.get("monto_recibido_usd") || 0);
+    payload.monto_recibido_bs = Number(formData.get("monto_recibido_bs") || 0);
+    payload.tasa_tipo = els.checkinTasaTipo?.value || "bcv";
+  }
   if (!payload.huesped) {
     showToast("Indique el nombre del huésped", "error");
     return;
   }
   try {
     const reserva = await post(`/habitaciones/${habId}/checkin`, payload);
-    showToast(
-      `Check-in OK · ${reserva.huesped} (reserva #${reserva.id})`,
-      "success",
-    );
+    let mensaje = `Check-in OK · ${reserva.huesped} (reserva #${reserva.id})`;
+    if (reserva.estado_pago === "pagado") {
+      mensaje += " · 💰 estadía pagada por adelantado";
+    } else if (reserva.estado_pago === "parcial") {
+      mensaje += " · pago parcial registrado";
+    }
+    showToast(mensaje, "success");
     cerrarCheckin();
     await loadHabitaciones();
   } catch (error) {
@@ -439,10 +499,8 @@ async function recargarPreviewCheckout() {
     }
     if (moneda === "mixto" && els.checkoutMixtoUsd && els.checkoutMixtoBs) {
       const recibidoUsd = Number(els.checkoutMixtoUsd.value || 0);
-      const faltanteUsd = Math.max(
-        0,
-        Number(preview.total_usd || 0) - recibidoUsd,
-      );
+      const objetivoUsd = Number(preview.pendiente_usd ?? preview.total_usd ?? 0);
+      const faltanteUsd = Math.max(0, objetivoUsd - recibidoUsd);
       els.checkoutMixtoBs.value = (
         faltanteUsd * Number(preview.tasa_aplicada || 0)
       ).toFixed(2);
@@ -458,15 +516,17 @@ function renderPreview(p, moneda = "usd") {
   const pedidos = p.pedidos?.length
     ? `<p class="text-xs text-slate-500">Pedidos asociados: ${p.pedidos.map((id) => `#${id}`).join(", ")}</p>`
     : "";
+  const pendienteUsd = Number(p.pendiente_usd ?? p.total_usd ?? 0);
+  const pendienteBs = Number(p.pendiente_bs ?? p.total_bs ?? 0);
   let totalDestacado;
   if (moneda === "bs") {
-    totalDestacado = `<strong>Total a cobrar: ${formatBs(p.total_bs)}</strong>
-      <p class="text-xs text-slate-500">Tasa ${p.tasa_tipo?.toUpperCase()}: ${Number(p.tasa_aplicada || 0).toFixed(2)} Bs/USD · equivalente ${formatUsd(p.total_usd)}</p>`;
+    totalDestacado = `<strong>Saldo a cobrar: ${formatBs(pendienteBs)}</strong>
+      <p class="text-xs text-slate-500">Tasa ${p.tasa_tipo?.toUpperCase()}: ${Number(p.tasa_aplicada || 0).toFixed(2)} Bs/USD · equivalente ${formatUsd(pendienteUsd)}</p>`;
   } else if (moneda === "mixto") {
-    totalDestacado = `<strong>Total a cobrar: ${formatUsd(p.total_usd)} · ${formatBs(p.total_bs)}</strong>
+    totalDestacado = `<strong>Saldo a cobrar: ${formatUsd(pendienteUsd)} · ${formatBs(pendienteBs)}</strong>
       <p class="text-xs text-slate-500">Ingrese USD recibidos; el resto se cobra en Bs (tasa ${p.tasa_tipo?.toUpperCase()}: ${Number(p.tasa_aplicada || 0).toFixed(2)})</p>`;
   } else {
-    totalDestacado = `<strong>Total a cobrar: ${formatUsd(p.total_usd)}</strong>
+    totalDestacado = `<strong>Saldo a cobrar: ${formatUsd(pendienteUsd)}</strong>
       <p class="text-xs text-slate-500">Sin tasa (efectivo en dólares)</p>`;
   }
   const extras =
@@ -476,12 +536,26 @@ function renderPreview(p, moneda = "usd") {
            <span class="text-xs text-slate-500">(salida ${p.hora_salida || ""}, estándar ${p.hora_salida_estandar || "13:00"})</span>
          </li>`
       : `<li class="text-xs text-slate-500">Salida ${p.hora_salida || p.hora_salida_estandar || "13:00"} · sin recargo</li>`;
+
+  const abonadoUsd = Number(p.pagado_parcial_usd || 0);
+  const abonadoBs = Number(p.pagado_parcial_bs || 0);
+  const abono =
+    abonadoUsd > 0 || abonadoBs > 0
+      ? `<li class="text-emerald-700">💰 Pagado por adelantado:
+            ${abonadoUsd > 0 ? formatUsd(abonadoUsd) : ""}
+            ${abonadoUsd > 0 && abonadoBs > 0 ? " · " : ""}
+            ${abonadoBs > 0 ? formatBs(abonadoBs) : ""}
+         </li>`
+      : "";
+
   return `
     <p><strong>Habitación #${p.numero}</strong>${p.huesped ? ` · ${p.huesped}` : ""}</p>
     <ul class="text-sm space-y-1 mt-2">
       <li>Estadía (${p.noches} noche${p.noches === 1 ? "" : "s"}): ${formatUsd(p.tarifa_usd)}${moneda !== "usd" ? ` · ${formatBs(p.tarifa_bs)}` : ""}</li>
       <li>Consumos: ${formatUsd(p.consumos_usd)}${moneda !== "usd" ? ` · ${formatBs(p.consumos_bs)}` : ""}</li>
       ${extras}
+      ${abono}
+      <li class="text-xs text-slate-500">Total estadía: ${formatUsd(p.total_usd)}${moneda !== "usd" ? ` · ${formatBs(p.total_bs)}` : ""}</li>
       <li class="border-t pt-1">${totalDestacado}</li>
     </ul>
     ${pedidos}

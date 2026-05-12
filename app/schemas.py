@@ -120,6 +120,17 @@ class HabitacionCheckinRequest(BaseModel):
     hora_ingreso: Optional[str] = Field(default=None, max_length=10)
     """Hora manual de ingreso del huésped (formato ``HH:MM``)."""
 
+    # ---- Pago anticipado opcional ----
+    pago_anticipado: bool = False
+    moneda_pago: Optional[str] = Field(default=None, max_length=10)
+    """``usd`` o ``bs`` (sólo aplica si ``pago_anticipado``)."""
+    metodo_pago: Optional[str] = Field(default=None, max_length=30)
+    """``efectivo``, ``transferencia``, ``pagomovil``..."""
+    monto_recibido_usd: Decimal = Field(default=Decimal("0"), ge=0)
+    monto_recibido_bs: Decimal = Field(default=Decimal("0"), ge=0)
+    tasa_tipo: Optional[str] = Field(default=None, max_length=20)
+    """Tasa a usar si el pago se hace en Bs."""
+
 
 class HabitacionCheckoutRequest(BaseModel):
     """Check-out + cobro de la habitación (estadía + consumos).
@@ -172,6 +183,13 @@ class HabitacionCheckoutPreview(BaseModel):
     horas_extra: int = 0
     recarga_extra_usd: Decimal = Decimal("0")
     recarga_extra_bs: Decimal = Decimal("0")
+    # Pago anticipado: monto ya abonado al hacer check-in.
+    pagado_parcial_usd: Decimal = Decimal("0")
+    pagado_parcial_bs: Decimal = Decimal("0")
+    estado_pago: str = "pendiente"
+    # Saldo pendiente tras restar el pago anticipado del total.
+    pendiente_usd: Decimal = Decimal("0")
+    pendiente_bs: Decimal = Decimal("0")
 
 
 class ReservaOut(ORMModel):
@@ -199,6 +217,9 @@ class ReservaOut(ORMModel):
     horas_extra: int = 0
     recarga_extra_usd: Decimal = Decimal("0")
     recarga_extra_bs: Decimal = Decimal("0")
+    pagado_parcial_usd: Decimal = Decimal("0")
+    pagado_parcial_bs: Decimal = Decimal("0")
+    estado_pago: str = "pendiente"
     created_at: datetime
     updated_at: datetime
 

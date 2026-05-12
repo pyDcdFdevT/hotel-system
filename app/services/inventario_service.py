@@ -96,3 +96,50 @@ def aumentar_stock(
     if not producto:
         raise ValueError(f"Producto {producto_id} no existe")
     _registrar_movimiento(db, producto, cantidad, tipo="entrada", motivo=motivo, referencia=referencia)
+
+
+def restaurar_inventario_por_receta(
+    db: Session,
+    producto_id: int,
+    cantidad: Decimal,
+    motivo: Optional[str] = None,
+    referencia: Optional[str] = None,
+) -> None:
+    """Inverso de ``descontar_inventario_por_receta``.
+
+    Si el producto tiene receta, devuelve los ingredientes consumidos; si no,
+    devuelve la unidad del propio producto. Útil al cancelar un pedido.
+    """
+    cantidad = Decimal(cantidad)
+    if cantidad <= 0:
+        raise ValueError("La cantidad debe ser mayor a cero")
+
+    producto = db.query(Producto).filter(Producto.id == producto_id).first()
+    if not producto:
+        raise ValueError(f"Producto {producto_id} no existe")
+
+    recetas = db.query(Receta).filter(Receta.producto_id == producto_id).all()
+    if recetas:
+        for receta in recetas:
+            ingrediente = db.query(Producto).filter(Producto.id == receta.ingrediente_id).first()
+            if not ingrediente:
+                continue
+            total = Decimal(receta.cantidad) * cantidad
+            _registrar_movimiento(
+                db,
+                ingrediente,
+                total,
+                tipo="entrada",
+                motivo=motivo or f"Devolución por cancelación de {producto.nombre}",
+                referencia=referencia,
+            )
+        return
+
+    _registrar_movimiento(
+        db,
+        producto,
+        cantidad,
+        tipo="entrada",
+        motivo=motivo or "Devolución por cancelación",
+        referencia=referencia,
+    )

@@ -319,6 +319,9 @@ def _migrar_reservas_vehiculo(engine) -> None:
             ("recarga_extra_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
             ("recarga_extra_bs", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
             ("metodo_pago", "VARCHAR(30)"),
+            ("pagado_parcial_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
+            ("pagado_parcial_bs", "NUMERIC(12, 2) NOT NULL DEFAULT 0"),
+            ("estado_pago", "VARCHAR(20) NOT NULL DEFAULT 'pendiente'"),
         )
         for nombre, tipo in nuevos:
             if nombre not in columnas:

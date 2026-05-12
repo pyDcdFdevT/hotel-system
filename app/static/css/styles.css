@@ -267,6 +267,35 @@ th {
   }
 }
 
+.pos-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--color-border);
+  font-size: 0.9rem;
+  font-weight: 500;
+  background-color: #f8fafc;
+}
+.pos-banner-inactive { background-color: #f1f5f9; color: #475569; }
+.pos-banner-active {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border-color: #10b981;
+}
+.pos-banner-cancel {
+  background-color: #fee2e2;
+  color: #991b1b;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid #fca5a5;
+}
+.pos-banner-cancel:hover { background-color: #fecaca; }
+
 .pos-section {
   background-color: var(--color-card);
   border: 1px solid var(--color-border);

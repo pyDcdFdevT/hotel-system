@@ -1,6 +1,7 @@
 import {
   get,
   post,
+  del as deleteApi,
   showToast,
   formatBs,
   formatUsd,
@@ -48,6 +49,10 @@ const els = {
   categorias: document.getElementById("pos-categorias"),
   mesasChips: document.getElementById("pos-mesas-chips"),
   btnNuevaMesa: document.getElementById("pos-btn-nueva-mesa"),
+  btnNuevaHabitacion: document.getElementById("pos-btn-nueva-habitacion"),
+  btnCancelarCuenta: document.getElementById("pos-btn-cancelar-cuenta"),
+  banner: document.getElementById("pos-banner"),
+  bannerText: document.getElementById("pos-banner-text"),
   btnRefrescarFavs: document.getElementById("pos-btn-refrescar-favs"),
   pedidoTitulo: document.getElementById("pos-pedido-titulo"),
   pedidoInfo: document.getElementById("pos-pedido-info"),
@@ -83,7 +88,14 @@ let horaTimer = null;
 
 export async function initPedidos() {
   if (els.busqueda) els.busqueda.addEventListener("input", renderCatalogo);
-  if (els.btnNuevaMesa) els.btnNuevaMesa.addEventListener("click", abrirNuevaMesa);
+  if (els.btnNuevaMesa)
+    els.btnNuevaMesa.addEventListener("click", () => abrirNuevaMesa("mesa"));
+  if (els.btnNuevaHabitacion)
+    els.btnNuevaHabitacion.addEventListener("click", () =>
+      abrirNuevaMesa("habitacion"),
+    );
+  if (els.btnCancelarCuenta)
+    els.btnCancelarCuenta.addEventListener("click", cancelarCuentaActiva);
   if (els.nuevaMesaCancelar)
     els.nuevaMesaCancelar.addEventListener("click", cerrarNuevaMesa);
   if (els.formNuevaMesa) els.formNuevaMesa.addEventListener("submit", crearNuevaMesa);
@@ -328,10 +340,54 @@ function renderMesasChips() {
   );
 }
 
-function abrirNuevaMesa() {
+function abrirNuevaMesa(modoInicial = "mesa") {
   els.formNuevaMesa?.reset();
+  if (els.formNuevaMesa) {
+    const radio = els.formNuevaMesa.querySelector(
+      `input[name="modo"][value="${modoInicial}"]`,
+    );
+    if (radio) radio.checked = true;
+  }
   actualizarModoNuevaMesa();
   els.modalNuevaMesa?.classList.remove("hidden");
+}
+
+function hayCuentaActiva() {
+  return Boolean(state.pedidoActivo?.id || state.mesaActiva);
+}
+
+async function cancelarCuentaActiva() {
+  if (!hayCuentaActiva()) return;
+  const etiqueta =
+    state.mesaActiva ||
+    (state.pedidoActivo ? `Pedido #${state.pedidoActivo.id}` : "esta cuenta");
+  if (!confirm(`¿Cancelar ${etiqueta} sin cobrar? Esta acción no se puede deshacer.`)) {
+    return;
+  }
+  try {
+    if (state.pedidoActivo?.id) {
+      await deleteApi(`/pedidos/${state.pedidoActivo.id}/cancelar`);
+      showToast(`Cuenta ${etiqueta} cancelada`, "info");
+    } else {
+      showToast(`Cuenta ${etiqueta} descartada (no estaba guardada)`, "info");
+    }
+  } catch (error) {
+    showToast(`Error cancelando: ${error.message}`, "error");
+    return;
+  }
+  resetearEstadoCuenta();
+  await Promise.all([cargarMesasActivas(), cargarProductos()]);
+}
+
+function resetearEstadoCuenta() {
+  state.carrito.clear();
+  state.pedidoActivo = null;
+  state.mesaActiva = null;
+  state.mesaTipo = "restaurante";
+  state.habitacionNumero = null;
+  state.reservaId = null;
+  localStorage.removeItem(STORAGE_KEY);
+  refrescarUI();
 }
 
 function cerrarNuevaMesa() {
@@ -464,14 +520,7 @@ function vaciarCarrito() {
 }
 
 function nuevoPedido() {
-  state.carrito.clear();
-  state.pedidoActivo = null;
-  state.mesaActiva = null;
-  state.mesaTipo = "restaurante";
-  state.habitacionNumero = null;
-  state.reservaId = null;
-  localStorage.removeItem(STORAGE_KEY);
-  refrescarUI();
+  resetearEstadoCuenta();
   showToast("Listo para nuevo pedido", "info");
 }
 
@@ -512,8 +561,40 @@ function renderPedidoInfo() {
     }
   }
   if (els.btnCobrar) {
-    const cobrable = Boolean(state.pedidoActivo && state.pedidoActivo.estado === "abierto");
-    els.btnCobrar.disabled = !cobrable;
+    const totales = totalesCarrito();
+    const totalGuardado = Number(state.pedidoActivo?.total_usd || 0);
+    const hayProductos =
+      state.carrito.size > 0 ||
+      totales.totalUsd > 0 ||
+      totalGuardado > 0 ||
+      (state.pedidoActivo?.detalles?.length ?? 0) > 0;
+    const cuenta = hayCuentaActiva();
+    els.btnCobrar.disabled = !(cuenta && hayProductos);
+  }
+  actualizarBannerCuenta();
+}
+
+function actualizarBannerCuenta() {
+  if (!els.banner || !els.bannerText) return;
+  if (hayCuentaActiva()) {
+    const etiqueta =
+      state.mesaActiva ||
+      (state.habitacionNumero
+        ? `Hab ${state.habitacionNumero}`
+        : `Pedido #${state.pedidoActivo?.id}`);
+    const desde = state.pedidoActivo?.fecha
+      ? ` (desde ${formatTimeVE(state.pedidoActivo.fecha)})`
+      : " (sin guardar)";
+    els.bannerText.textContent = `🟢 Cuenta activa: ${etiqueta}${desde}`;
+    els.banner.classList.remove("pos-banner-inactive");
+    els.banner.classList.add("pos-banner-active");
+    if (els.btnCancelarCuenta) els.btnCancelarCuenta.classList.remove("hidden");
+  } else {
+    els.bannerText.textContent =
+      "⚫ Ninguna cuenta activa. Crea una mesa o cuenta para comenzar.";
+    els.banner.classList.add("pos-banner-inactive");
+    els.banner.classList.remove("pos-banner-active");
+    if (els.btnCancelarCuenta) els.btnCancelarCuenta.classList.add("hidden");
   }
 }
 
@@ -729,7 +810,7 @@ async function confirmarPago(event) {
     }
     showToast(mensaje, "success");
     cerrarModalPago();
-    nuevoPedido();
+    resetearEstadoCuenta();
     await Promise.all([cargarProductos(), cargarMesasActivas(), cargarFavoritos()]);
   } catch (error) {
     showToast(`Error en pago: ${error.message}`, "error");

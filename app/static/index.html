@@ -299,13 +299,57 @@
             </div>
           </details>
 
+          <fieldset class="border rounded p-3 space-y-2" id="checkin-pago">
+            <legend class="text-sm font-medium text-slate-700 px-1">💰 Pago anticipado (opcional)</legend>
+            <div class="flex gap-3 text-sm">
+              <label class="flex items-center gap-1">
+                <input type="radio" name="pago_anticipado" value="0" checked /> Pagar al check-out
+              </label>
+              <label class="flex items-center gap-1">
+                <input type="radio" name="pago_anticipado" value="1" /> Pagar ahora
+              </label>
+            </div>
+            <div id="checkin-pago-detalle" class="hidden space-y-2">
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-xs uppercase text-slate-500">Moneda</label>
+                  <select id="checkin-pago-moneda" name="moneda_pago" class="w-full border rounded px-2 py-1">
+                    <option value="usd">USD</option>
+                    <option value="bs">Bolívares</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs uppercase text-slate-500">Método</label>
+                  <select id="checkin-pago-metodo" name="metodo_pago" class="w-full border rounded px-2 py-1">
+                    <option value="efectivo">💵 Efectivo</option>
+                    <option value="transferencia">💳 Transferencia</option>
+                    <option value="pagomovil">📱 Pago Móvil</option>
+                  </select>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div id="checkin-pago-usd-row">
+                  <label class="text-xs uppercase text-slate-500">Monto USD</label>
+                  <input id="checkin-pago-usd" type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
+                </div>
+                <div id="checkin-pago-bs-row" class="hidden">
+                  <label class="text-xs uppercase text-slate-500">Monto Bs</label>
+                  <input id="checkin-pago-bs" type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
+                </div>
+              </div>
+              <p class="text-xs text-slate-500" id="checkin-pago-hint">
+                Si dejas el monto en 0 se asumirá que paga el total de la estadía.
+              </p>
+            </div>
+          </fieldset>
+
           <div>
             <label class="text-xs uppercase text-slate-500">Notas</label>
             <input name="notas" class="w-full border rounded px-2 py-1" />
           </div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" id="checkin-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
-            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Confirmar check-in</button>
+            <button type="submit" id="checkin-submit" class="px-3 py-1 bg-blue-600 text-white rounded">Confirmar check-in</button>
           </div>
         </form>
       </div>
@@ -515,10 +559,25 @@
 
         <!-- ============ Columna derecha: carrito y mesas ============ -->
         <div class="space-y-4">
+          <!-- Banner del estado de la cuenta activa -->
+          <div id="pos-banner" class="pos-banner pos-banner-inactive">
+            <span id="pos-banner-text">⚫ Ninguna cuenta activa. Crea una mesa o cuenta para comenzar.</span>
+            <button id="pos-btn-cancelar-cuenta" type="button" class="pos-banner-cancel hidden">
+              🗑️ Cancelar cuenta
+            </button>
+          </div>
+
           <div class="pos-section">
             <div class="flex items-center justify-between mb-2">
               <h2 class="text-lg font-semibold">Mesas activas</h2>
-              <button id="pos-btn-nueva-mesa" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">+ Nueva mesa</button>
+              <div class="flex gap-2">
+                <button id="pos-btn-nueva-mesa" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">
+                  ➕ Nueva mesa
+                </button>
+                <button id="pos-btn-nueva-habitacion" type="button" class="px-3 py-1.5 bg-amber-600 text-white rounded text-sm">
+                  🏨 Por habitación
+                </button>
+              </div>
             </div>
             <div id="pos-mesas-chips" class="flex flex-wrap gap-2"></div>
           </div>

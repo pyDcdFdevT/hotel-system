@@ -862,3 +862,193 @@ def test_menu_completo_seed(client):
     assert mojito["area"] == "bar"
     tequenos = next(p for p in productos if p["nombre"] == "Tequeños")
     assert tequenos["area"] == "cocina"
+
+
+# ---------------------------------------------------------------------------
+# POS: flujo completo + cancelación
+# ---------------------------------------------------------------------------
+def test_pos_flujo_completo(client):
+    """Crear mesa, agregar productos, cobrar en USD: la cuenta queda pagada."""
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "bar",
+            "mesa": "Mesa POS Test",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 2}],
+        },
+    ).json()
+    assert pedido["estado"] == "abierto"
+    assert pedido["mesa"] == "Mesa POS Test"
+
+    # Agregar más items.
+    pedido = client.post(
+        f"/api/pedidos/{pedido['id']}/agregar",
+        json={
+            "tipo": "bar",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 1}],
+        },
+    ).json()
+    total_usd = float(pedido["total_usd"])
+    assert total_usd > 0
+
+    # Cobrar en USD.
+    pago = client.post(
+        f"/api/pedidos/{pedido['id']}/pagar",
+        json={"metodo_pago": "usd", "monto_usd": total_usd},
+    )
+    assert pago.status_code == 200, pago.text
+    body = pago.json()
+    assert body["estado"] == "pagado"
+    assert float(body["pagado_usd"]) >= total_usd
+
+
+def test_cancelar_cuenta_devuelve_stock(client):
+    """Cancelar un pedido abierto devuelve los ingredientes al stock."""
+    productos = client.get("/api/productos/").json()
+    # Hamburguesa Clásica tiene receta con Pan, Carne y Queso → al cancelar
+    # debe devolver el stock consumido al crear el pedido.
+    hamburguesa = next(p for p in productos if p["nombre"] == "Hamburguesa Clásica")
+    pan = next(p for p in productos if p["nombre"] == "Pan hamburguesa")
+    pan_inicial = float(pan["stock_actual"])
+
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Mesa Cancelar",
+            "items": [{"producto_id": hamburguesa["id"], "cantidad": 2}],
+        },
+    ).json()
+    productos_durante = client.get("/api/productos/").json()
+    pan_durante = float(
+        next(p for p in productos_durante if p["nombre"] == "Pan hamburguesa")["stock_actual"]
+    )
+    assert pan_durante == pan_inicial - 2
+
+    # Cancelar y verificar restauración.
+    resp = client.delete(f"/api/pedidos/{pedido['id']}/cancelar")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["estado"] == "cancelado"
+
+    productos_despues = client.get("/api/productos/").json()
+    pan_despues = float(
+        next(p for p in productos_despues if p["nombre"] == "Pan hamburguesa")["stock_actual"]
+    )
+    assert pan_despues == pan_inicial, (
+        f"Stock no se restauró: {pan_inicial} → {pan_despues}"
+    )
+
+    # Reintentar cancelar el mismo pedido debe fallar.
+    resp2 = client.delete(f"/api/pedidos/{pedido['id']}/cancelar")
+    assert resp2.status_code == 400
+
+
+def test_cancelar_cuenta_requiere_rol(anon_client):
+    """Sólo admin/mesero pueden cancelar; cocina no."""
+    cocina_token = anon_client.post(
+        "/api/auth/login", json={"pin": "3333"}
+    ).json()["token"]
+    headers = {"Authorization": f"Bearer {cocina_token}"}
+    resp = anon_client.delete("/api/pedidos/99999/cancelar", headers=headers)
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Pago anticipado en check-in
+# ---------------------------------------------------------------------------
+def _habitacion_disponible(client):
+    """Devuelve una habitación en estado 'disponible'.
+
+    Si todas las "estándar" están en limpieza/ocupada (por orden de tests),
+    libera una de las inhabilitadas (201+) para usarla.
+    """
+    habs = client.get("/api/habitaciones/").json()
+    libre = next((h for h in habs if h["estado"] == "disponible"), None)
+    if libre:
+        return libre
+    candidata = next(h for h in habs if h["estado"] == "inhabilitada")
+    client.put(f"/api/habitaciones/{candidata['id']}/estado", json={"estado": "disponible"})
+    return client.get(f"/api/habitaciones/{candidata['id']}").json()
+
+
+def test_pago_anticipado_checkin(client):
+    """Huésped paga la estadía al llegar; el check-out sólo cobra consumos."""
+    hab = _habitacion_disponible(client)
+
+    reserva = client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={
+            "huesped": "Pago Adelantado",
+            "noches": 1,
+            "pago_anticipado": True,
+            "moneda_pago": "usd",
+            "metodo_pago": "efectivo",
+            "monto_recibido_usd": 20,
+        },
+    )
+    assert reserva.status_code == 200, reserva.text
+    body = reserva.json()
+    assert body["estado_pago"] == "pagado"
+    assert float(body["pagado_parcial_usd"]) == 20.0
+
+    # Preview de checkout: pendiente debería ser 0 (estadía ya pagada).
+    preview = client.get(
+        f"/api/habitaciones/{hab['id']}/checkout-preview"
+    ).json()
+    assert float(preview["pagado_parcial_usd"]) == 20.0
+    assert float(preview["pendiente_usd"]) == 0.0
+    assert float(preview["total_usd"]) == 20.0
+    assert preview["estado_pago"] == "pagado"
+
+    # Cerrar check-out: el cobro en USD debe ser 0 (todo estaba pagado).
+    cierre = client.post(
+        f"/api/habitaciones/{hab['id']}/checkout",
+        json={"opcion_pago": "efectivo_usd"},
+    )
+    assert cierre.status_code == 200, cierre.text
+    body = cierre.json()
+    # total_usd en la respuesta corresponde a lo cobrado AHORA (pendiente),
+    # que debe ser 0 al estar todo pagado de antemano.
+    assert float(body["total_usd"]) == 0.0
+
+
+def test_pago_anticipado_parcial(client):
+    """Si el huésped paga menos del total, estado_pago=parcial y el check-out cobra el faltante."""
+    hab = _habitacion_disponible(client)
+
+    reserva = client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={
+            "huesped": "Pago Parcial",
+            "noches": 1,
+            "pago_anticipado": True,
+            "moneda_pago": "usd",
+            "metodo_pago": "efectivo",
+            "monto_recibido_usd": 12,
+        },
+    )
+    assert reserva.status_code == 200, reserva.text
+    body = reserva.json()
+    assert body["estado_pago"] == "parcial"
+    tarifa_total = float(body["tarifa_usd"])
+    assert tarifa_total > 12
+
+    preview = client.get(
+        f"/api/habitaciones/{hab['id']}/checkout-preview"
+    ).json()
+    # Pendiente = total estadía + consumos pre-existentes - 12 abonados.
+    esperado_pendiente = round(float(preview["total_usd"]) - 12, 2)
+    assert abs(float(preview["pendiente_usd"]) - esperado_pendiente) < 0.01, (
+        f"pendiente {preview['pendiente_usd']} != esperado {esperado_pendiente}"
+    )
+
+    cierre = client.post(
+        f"/api/habitaciones/{hab['id']}/checkout",
+        json={"opcion_pago": "efectivo_usd"},
+    ).json()
+    assert abs(float(cierre["total_usd"]) - esperado_pendiente) < 0.01
