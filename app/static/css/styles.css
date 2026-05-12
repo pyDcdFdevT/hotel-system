@@ -131,3 +131,156 @@ th {
   letter-spacing: 0.05em;
   font-size: 0.75rem;
 }
+
+/* ----------------------------- POS / Ventas ----------------------------- */
+
+.pos-shell {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1024px) {
+  .pos-shell {
+    grid-template-columns: 1.4fr 1fr;
+  }
+}
+
+.pos-section {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.pos-favoritos-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.pos-prod-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.6rem;
+  background-color: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease;
+  font-size: 0.85rem;
+}
+
+.pos-prod-btn:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(15, 23, 42, 0.06);
+}
+
+.pos-prod-btn .pos-prod-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.pos-prod-btn .pos-prod-price {
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+
+.pos-prod-btn .pos-prod-badge {
+  font-size: 0.65rem;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pos-categoria {
+  border-top: 1px solid var(--color-border);
+}
+
+.pos-categoria:first-of-type {
+  border-top: none;
+}
+
+.pos-categoria summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.6rem 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.pos-categoria summary::-webkit-details-marker {
+  display: none;
+}
+
+.pos-categoria summary::after {
+  content: "▾";
+  transition: transform 0.15s ease;
+  color: var(--color-muted);
+}
+
+.pos-categoria[open] summary::after {
+  transform: rotate(-180deg);
+}
+
+.pos-categoria-body {
+  padding: 0.25rem 0 0.75rem;
+}
+
+.pos-mesa-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  background-color: #ffffff;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.pos-mesa-chip.active {
+  background-color: var(--color-primary);
+  color: #ffffff;
+  border-color: var(--color-primary);
+}
+
+.pos-mesa-chip .pos-mesa-total {
+  font-weight: 600;
+}
+
+.pos-cart-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.pos-cart-actions .btn-pos {
+  padding: 0.75rem 1rem;
+  border-radius: 0.6rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pos-cart-actions .btn-cobrar {
+  background-color: var(--color-success);
+  color: #ffffff;
+}
+
+.pos-cart-actions .btn-cobrar:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pos-cart-actions .btn-nuevo {
+  background-color: #ffffff;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
     Boolean,
@@ -20,12 +21,21 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+CARACAS_TZ = ZoneInfo("America/Caracas")
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def caracas_now() -> datetime:
+    """Hora local Venezuela (naive datetime para almacenar en SQLite)."""
+    return datetime.now(CARACAS_TZ).replace(tzinfo=None)
+
+
 def today() -> date:
-    return datetime.now(UTC).date()
+    """Fecha calendario de Venezuela (America/Caracas)."""
+    return datetime.now(CARACAS_TZ).date()
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +124,7 @@ class ConsumoHabitacion(Base):
     id = Column(Integer, primary_key=True, index=True)
     reserva_id = Column(Integer, ForeignKey("reservas.id"), nullable=False, index=True)
     pedido_id = Column(Integer, ForeignKey("pedidos.id"))
-    fecha = Column(DateTime, default=utc_now, nullable=False)
+    fecha = Column(DateTime, default=caracas_now, nullable=False)
     concepto = Column(String(120), nullable=False)
     monto_bs = Column(Numeric(12, 2), default=0, nullable=False)
     monto_usd = Column(Numeric(10, 2), default=0, nullable=False)
@@ -189,10 +199,10 @@ class Pedido(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     tipo = Column(String(30), default="restaurante", nullable=False, index=True)
-    mesa = Column(String(20))
+    mesa = Column(String(20), index=True)
     reserva_id = Column(Integer, ForeignKey("reservas.id"), index=True)
     estado = Column(String(20), default="abierto", nullable=False, index=True)
-    fecha = Column(DateTime, default=utc_now, nullable=False, index=True)
+    fecha = Column(DateTime, default=caracas_now, nullable=False, index=True)
     tasa_usd_del_dia = Column(Numeric(12, 4), default=0, nullable=False)
     total_bs = Column(Numeric(12, 2), default=0, nullable=False)
     total_usd = Column(Numeric(10, 2), default=0, nullable=False)

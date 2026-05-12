@@ -73,12 +73,13 @@ def listar(
 
 @router.get("/activos", response_model=List[PedidoOut])
 def listar_activos(db: Session = Depends(get_db)):
+    """Pedidos abiertos ordenados por mesa (los sin mesa al final)."""
     try:
         return (
             db.query(Pedido)
             .options(joinedload(Pedido.detalles))
             .filter(Pedido.estado == "abierto")
-            .order_by(Pedido.fecha.desc())
+            .order_by(Pedido.mesa.is_(None).asc(), Pedido.mesa.asc(), Pedido.fecha.desc())
             .all()
         )
     except Exception as exc:
@@ -160,6 +161,78 @@ def crear_pedido(data: PedidoCreate, db: Session = Depends(get_db)):
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creando pedido: {exc}") from exc
+
+
+@router.post("/{pedido_id}/agregar", response_model=PedidoOut)
+def agregar_items(pedido_id: int, data: PedidoCreate, db: Session = Depends(get_db)):
+    """Añade productos a un pedido ya creado y en estado 'abierto'."""
+    pedido = _cargar_pedido(db, pedido_id)
+    if pedido.estado != "abierto":
+        raise HTTPException(
+            status_code=400, detail=f"No se pueden agregar ítems a un pedido {pedido.estado}"
+        )
+    if not data.items:
+        raise HTTPException(status_code=400, detail="Indique al menos un ítem para agregar")
+
+    try:
+        total_bs = Decimal(pedido.total_bs or 0)
+        total_usd = Decimal(pedido.total_usd or 0)
+
+        for item in data.items:
+            producto = db.query(Producto).filter(Producto.id == item.producto_id).first()
+            if not producto:
+                raise HTTPException(status_code=404, detail=f"Producto {item.producto_id} no existe")
+            if not producto.activo:
+                raise HTTPException(status_code=400, detail=f"Producto '{producto.nombre}' inactivo")
+            if not producto.es_para_venta:
+                raise HTTPException(status_code=400, detail=f"Producto '{producto.nombre}' no es para venta")
+
+            cantidad = Decimal(item.cantidad)
+            precio_bs = Decimal(producto.precio_bs or 0)
+            precio_usd = Decimal(producto.precio_usd or 0)
+            subtotal_bs = (precio_bs * cantidad).quantize(Decimal("0.01"))
+            subtotal_usd = (precio_usd * cantidad).quantize(Decimal("0.01"))
+
+            descontar_inventario_por_receta(
+                db,
+                producto_id=producto.id,
+                cantidad=cantidad,
+                motivo=f"Pedido #{pedido.id} (agregado)",
+                referencia=f"pedido:{pedido.id}",
+            )
+
+            detalle = DetallePedido(
+                pedido_id=pedido.id,
+                producto_id=producto.id,
+                cantidad=cantidad,
+                precio_unit_bs=precio_bs,
+                precio_unit_usd=precio_usd,
+                subtotal_bs=subtotal_bs,
+                subtotal_usd=subtotal_usd,
+            )
+            db.add(detalle)
+            total_bs += subtotal_bs
+            total_usd += subtotal_usd
+
+        pedido.total_bs = total_bs
+        pedido.total_usd = total_usd
+        pedido.updated_at = utc_now()
+        if data.notas:
+            existentes = (pedido.notas or "").strip()
+            pedido.notas = f"{existentes} | {data.notas}".strip(" |") if existentes else data.notas
+
+        db.commit()
+        db.expire_all()
+        return _cargar_pedido(db, pedido.id)
+    except HTTPException:
+        db.rollback()
+        raise
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error agregando ítems: {exc}") from exc
 
 
 @router.post("/{pedido_id}/pagar", response_model=PedidoOut)

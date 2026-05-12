@@ -55,18 +55,46 @@ export function formatRate(value) {
   return n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+const VE_TZ = "America/Caracas";
+
 export function formatDate(value) {
   if (!value) return "-";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" });
+  return d.toLocaleString("es-VE", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: VE_TZ,
+  });
 }
 
 export function formatDateOnly(value) {
   if (!value) return "-";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("es-VE", { dateStyle: "short" });
+  return d.toLocaleDateString("es-VE", {
+    dateStyle: "short",
+    timeZone: VE_TZ,
+  });
+}
+
+export function formatTimeVE(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleTimeString("es-VE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: VE_TZ,
+  });
+}
+
+export function nowVE() {
+  return new Date().toLocaleString("es-VE", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: VE_TZ,
+  });
 }
 
 export function showToast(message, type = "info") {

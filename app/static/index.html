@@ -291,39 +291,45 @@
       </div>
     </section>
 
-    <!-- POS -->
+    <!-- Ventas (POS) -->
     <section id="tab-pos" class="tab-panel">
-      <div class="grid lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-2 space-y-4">
-          <div class="card p-4 grid md:grid-cols-4 gap-3 items-end">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Tipo</label>
-              <select id="pos-tipo" class="w-full border rounded px-2 py-1">
-                <option value="restaurante">Restaurante</option>
-                <option value="bar">Bar</option>
-                <option value="habitacion">Habitación</option>
-                <option value="general">General</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Mesa / Ubicación</label>
-              <input id="pos-mesa" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div class="md:col-span-2">
-              <label class="text-xs uppercase text-slate-500">Habitación (cargo)</label>
-              <select id="pos-reserva" class="w-full border rounded px-2 py-1"></select>
-            </div>
-            <div class="md:col-span-4">
-              <input id="pos-busqueda" placeholder="Buscar producto..." class="w-full border rounded px-2 py-1" />
-            </div>
-          </div>
-          <div id="pos-productos" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3"></div>
-        </div>
+      <div class="pos-shell">
+        <!-- ============ Columna izquierda: productos ============ -->
         <div class="space-y-4">
-          <div class="card p-4">
+          <div class="pos-section">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <h2 class="text-lg font-semibold">⭐ Favoritos</h2>
+              <button id="pos-btn-refrescar-favs" class="text-xs text-slate-500 underline">Actualizar</button>
+            </div>
+            <div id="pos-favoritos" class="pos-favoritos-grid"></div>
+          </div>
+
+          <div class="pos-section">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <h2 class="text-lg font-semibold">Catálogo</h2>
+              <input id="pos-busqueda" placeholder="Buscar producto..." class="border rounded px-2 py-1 text-sm w-56" />
+            </div>
+            <div id="pos-categorias"></div>
+          </div>
+        </div>
+
+        <!-- ============ Columna derecha: carrito y mesas ============ -->
+        <div class="space-y-4">
+          <div class="pos-section">
             <div class="flex items-center justify-between mb-2">
-              <h2 class="text-lg font-semibold">Carrito</h2>
-              <button id="pos-btn-vaciar" class="text-xs text-red-600">Vaciar</button>
+              <h2 class="text-lg font-semibold">Mesas activas</h2>
+              <button id="pos-btn-nueva-mesa" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">+ Nueva mesa</button>
+            </div>
+            <div id="pos-mesas-chips" class="flex flex-wrap gap-2"></div>
+          </div>
+
+          <div class="pos-section">
+            <div class="flex items-center justify-between mb-2">
+              <div>
+                <h2 class="text-lg font-semibold">Pedido actual</h2>
+                <p class="text-xs text-slate-500" id="pos-pedido-titulo">Sin mesa seleccionada</p>
+              </div>
+              <button id="pos-btn-vaciar" class="text-xs text-red-600">Vaciar carrito</button>
             </div>
             <div class="overflow-x-auto">
               <table>
@@ -331,7 +337,7 @@
                   <tr>
                     <th>Producto</th>
                     <th>Precio</th>
-                    <th>Cantidad</th>
+                    <th>Cant.</th>
                     <th>Subtotal</th>
                     <th></th>
                   </tr>
@@ -344,35 +350,45 @@
               <p class="text-sm">Total Bs: <strong id="pos-total-bs">Bs 0.00</strong></p>
               <p class="text-xs text-slate-500" id="pos-tasa">Tasa día: --</p>
             </div>
-            <div class="grid grid-cols-2 gap-2 mt-3">
-              <button id="pos-btn-crear" class="px-3 py-2 bg-blue-600 text-white rounded">Crear pedido</button>
-              <button id="pos-btn-cargar" class="px-3 py-2 bg-amber-600 text-white rounded">Cargar a habitación</button>
+
+            <div class="pos-cart-actions mt-4">
+              <button id="pos-btn-cobrar" class="btn-pos btn-cobrar" disabled>CERRAR Y COBRAR</button>
+              <button id="pos-btn-nuevo" class="btn-pos btn-nuevo">NUEVO PEDIDO</button>
             </div>
-          </div>
-          <div class="card p-4 hidden" id="pos-pedido-card">
-            <h3 class="text-base font-semibold mb-2">Pedido activo</h3>
-            <div id="pos-pedido-info" class="text-sm"></div>
-            <button id="pos-btn-pagar" disabled class="mt-3 w-full px-3 py-2 bg-emerald-600 text-white rounded disabled:opacity-50">Cobrar</button>
-          </div>
-          <div class="card p-4">
-            <h3 class="text-base font-semibold mb-2">Pedidos activos</h3>
-            <div class="overflow-x-auto">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Tipo</th>
-                    <th>Mesa</th>
-                    <th>Total</th>
-                    <th>Estado</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="pos-pedidos-activos"></tbody>
-              </table>
+            <div class="mt-2 text-xs text-slate-500">
+              <p id="pos-pedido-info"></p>
+              <p id="pos-hora-actual"></p>
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Modal nueva mesa -->
+      <div id="modal-nueva-mesa" class="modal-backdrop hidden">
+        <form id="form-nueva-mesa" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold">Nueva mesa o cliente</h3>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Mesa / Cliente</label>
+            <input name="mesa" placeholder="Ej: Mesa 5 o Juan Pérez" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Tipo</label>
+            <select name="tipo" class="w-full border rounded px-2 py-1">
+              <option value="restaurante">Restaurante</option>
+              <option value="bar">Bar</option>
+              <option value="habitacion">Habitación</option>
+              <option value="general">General</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Cargar a reserva (opcional)</label>
+            <select id="pos-reserva" name="reserva_id" class="w-full border rounded px-2 py-1"></select>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="nueva-mesa-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Abrir mesa</button>
+          </div>
+        </form>
       </div>
 
       <div id="modal-pago" class="modal-backdrop hidden">

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -10,8 +12,10 @@ from app.database import get_db
 from app.models import (
     DetallePedido,
     MovimientoInventario,
+    Pedido,
     Producto,
     Receta,
+    caracas_now,
 )
 from app.schemas import (
     ProductoCreate,
@@ -43,6 +47,58 @@ def listar(
         return query.order_by(Producto.nombre.asc()).all()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error listando productos: {exc}") from exc
+
+
+@router.get("/favoritos", response_model=List[ProductoOut])
+def productos_favoritos(
+    dias: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Top productos más vendidos en los últimos ``dias`` días."""
+    try:
+        desde = caracas_now() - timedelta(days=dias)
+        ranking = (
+            db.query(
+                DetallePedido.producto_id,
+                func.coalesce(func.sum(DetallePedido.cantidad), 0).label("vendidos"),
+            )
+            .join(Pedido, DetallePedido.pedido_id == Pedido.id)
+            .filter(Pedido.estado.in_(["pagado", "cargado"]))
+            .filter(Pedido.fecha >= desde)
+            .group_by(DetallePedido.producto_id)
+            .order_by(func.sum(DetallePedido.cantidad).desc())
+            .limit(limit)
+            .all()
+        )
+
+        ids_ordenados = [row.producto_id for row in ranking]
+        if not ids_ordenados:
+            # Fallback: si aún no hay historial, devolvemos los primeros productos
+            # marcados como para venta y activos para que la sección no quede vacía.
+            return (
+                db.query(Producto)
+                .filter(Producto.activo.is_(True))
+                .filter(Producto.es_para_venta.is_(True))
+                .order_by(Producto.nombre.asc())
+                .limit(limit)
+                .all()
+            )
+
+        productos = (
+            db.query(Producto)
+            .filter(Producto.id.in_(ids_ordenados))
+            .filter(Producto.activo.is_(True))
+            .filter(Producto.es_para_venta.is_(True))
+            .all()
+        )
+        orden = {pid: idx for idx, pid in enumerate(ids_ordenados)}
+        productos.sort(key=lambda p: orden.get(p.id, 999))
+        return productos
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Error listando favoritos: {exc}"
+        ) from exc
 
 
 @router.get("/{producto_id}", response_model=ProductoOut)

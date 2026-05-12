@@ -75,6 +75,71 @@ def test_productos_crud_editar_y_eliminar(client):
     assert payload["borrado"] is True
 
 
+def test_agregar_items_a_pedido_existente(client):
+    productos = client.get("/api/productos/").json()
+    p1 = next(p for p in productos if p["nombre"] == "Mojito")
+    p2 = next(p for p in productos if p["nombre"] == "Tequeños")
+
+    pedido = client.post(
+        "/api/pedidos/",
+        json={"tipo": "restaurante", "mesa": "Mesa 7",
+              "items": [{"producto_id": p1["id"], "cantidad": 1}]},
+    ).json()
+    assert pedido["estado"] == "abierto"
+    total_inicial = float(pedido["total_usd"])
+
+    agregado = client.post(
+        f"/api/pedidos/{pedido['id']}/agregar",
+        json={"tipo": pedido["tipo"], "items": [{"producto_id": p2["id"], "cantidad": 2}]},
+    )
+    assert agregado.status_code == 200, agregado.text
+    body = agregado.json()
+    assert float(body["total_usd"]) > total_inicial
+    # 2 detalles: Mojito + Tequeños
+    assert len(body["detalles"]) == 2
+
+
+def test_productos_favoritos(client):
+    # Fuerza una venta para que aparezca en favoritos.
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+    pedido = client.post(
+        "/api/pedidos/",
+        json={"tipo": "bar", "mesa": "Barra",
+              "items": [{"producto_id": cerveza["id"], "cantidad": 5}]},
+    ).json()
+    client.post(
+        f"/api/pedidos/{pedido['id']}/pagar",
+        json={"metodo_pago": "usd", "monto_usd": 7.5},
+    )
+
+    resp = client.get("/api/productos/favoritos?limit=5")
+    assert resp.status_code == 200, resp.text
+    favs = resp.json()
+    assert len(favs) > 0
+    nombres = [p["nombre"] for p in favs]
+    assert "Cerveza Solera" in nombres
+
+
+def test_pedidos_activos_agrupados(client):
+    productos = client.get("/api/productos/").json()
+    p1 = next(p for p in productos if p["nombre"] == "Papas Francesas")
+    client.post(
+        "/api/pedidos/",
+        json={"tipo": "restaurante", "mesa": "Mesa 1",
+              "items": [{"producto_id": p1["id"], "cantidad": 1}]},
+    )
+    client.post(
+        "/api/pedidos/",
+        json={"tipo": "restaurante", "mesa": "Mesa 2",
+              "items": [{"producto_id": p1["id"], "cantidad": 1}]},
+    )
+    activos = client.get("/api/pedidos/activos").json()
+    mesas = [p.get("mesa") for p in activos if p.get("estado") == "abierto"]
+    assert "Mesa 1" in mesas
+    assert "Mesa 2" in mesas
+
+
 def test_bancos_renombrados_en_seed(client):
     cuentas = client.get("/api/cuentas/").json()
     nombres = {c["nombre"] for c in cuentas}
