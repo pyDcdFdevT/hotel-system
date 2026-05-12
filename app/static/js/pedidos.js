@@ -43,7 +43,6 @@ const els = {
   pagoMetodo: document.getElementById("pago-metodo"),
   pagoTasaTipo: document.getElementById("pago-tasa-tipo"),
   pagoTasaInfo: document.getElementById("pago-tasa-info"),
-  btnPagoMovil: document.getElementById("pago-btn-pagomovil"),
 };
 
 export async function initPedidos() {
@@ -86,9 +85,6 @@ export async function initPedidos() {
   }
   if (els.pagoMetodo) {
     els.pagoMetodo.addEventListener("change", actualizarInfoTasa);
-  }
-  if (els.btnPagoMovil) {
-    els.btnPagoMovil.addEventListener("click", iniciarPagoMovil);
   }
   document.addEventListener("tasas:actualizadas", actualizarTasasCache);
 
@@ -399,33 +395,6 @@ function abrirModalPago() {
 
 function cerrarModalPago() {
   els.modalPago?.classList.add("hidden");
-}
-
-function iniciarPagoMovil() {
-  if (!state.pedidoActivo) {
-    showToast("Cree un pedido primero", "error");
-    return;
-  }
-  const tasa = tasaActual();
-  const total_bs = Number(state.pedidoActivo.total_bs || 0);
-  const total_usd = Number(state.pedidoActivo.total_usd || 0);
-  const totalBsTasa = total_usd * tasa;
-  const finalBs = total_bs > 0 ? total_bs : totalBsTasa;
-  const mensaje =
-    `Pago Móvil — Pedido #${state.pedidoActivo.id}\n` +
-    `Tasa ${state.tasaTipo.toUpperCase()}: ${formatRate(tasa)} Bs/USD\n` +
-    `Total a pagar:\n` +
-    `  ${formatBs(finalBs)}\n` +
-    `  (≈ ${formatUsd(total_usd)})\n\n` +
-    `¿Confirmar cobro por Pago Móvil?`;
-  if (!window.confirm(mensaje)) return;
-
-  if (els.pagoMetodo) els.pagoMetodo.value = "pagomovil";
-  const inputBs = els.formPago?.querySelector('[name="monto_bs"]');
-  const inputUsd = els.formPago?.querySelector('[name="monto_usd"]');
-  if (inputBs) inputBs.value = finalBs.toFixed(2);
-  if (inputUsd) inputUsd.value = "0";
-  els.formPago?.requestSubmit();
 }
 
 async function confirmarPago(event) {
