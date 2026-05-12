@@ -31,12 +31,23 @@ const els = {
   checkinTitulo: document.getElementById("checkin-titulo"),
   checkinHabId: document.getElementById("checkin-habitacion-id"),
   checkinTarifa: document.getElementById("checkin-tarifa"),
+  checkinNoches: document.getElementById("checkin-noches"),
+  checkinFechaIn: null,
+  checkinFechaOut: null,
+  checkinTasaTipo: document.getElementById("checkin-tasa-tipo"),
+  checkinTotalNoches: document.getElementById("checkin-total-noches"),
+  checkinTotalUnit: document.getElementById("checkin-total-unit"),
+  checkinTotalUsd: document.getElementById("checkin-total-usd"),
+  checkinTotalBs: document.getElementById("checkin-total-bs"),
+  checkinTasaInfo: document.getElementById("checkin-tasa-info"),
 
   modalCheckout: document.getElementById("modal-checkout"),
   formCheckout: document.getElementById("form-checkout"),
   checkoutCancelar: document.getElementById("checkout-cancelar"),
   checkoutResumen: document.getElementById("checkout-resumen"),
   checkoutHabId: document.getElementById("checkout-habitacion-id"),
+  checkoutTasaRow: document.getElementById("checkout-tasa-row"),
+  checkoutTasaTipo: document.getElementById("checkout-tasa-tipo"),
 };
 
 let habitaciones = [];
@@ -49,13 +60,33 @@ export async function initHabitaciones() {
 
   if (els.checkinCancelar)
     els.checkinCancelar.addEventListener("click", cerrarCheckin);
-  if (els.formCheckin)
+  if (els.formCheckin) {
     els.formCheckin.addEventListener("submit", confirmarCheckin);
+    // Cálculo automático: cualquier cambio recotiza.
+    ["change", "input"].forEach((evt) =>
+      els.formCheckin.addEventListener(evt, (e) => {
+        if (
+          ["fecha_checkin", "fecha_checkout_estimado", "noches", "tarifa_usd"].includes(
+            e.target.name,
+          ) ||
+          e.target.id === "checkin-tasa-tipo"
+        ) {
+          recalcCheckin();
+        }
+      }),
+    );
+  }
 
   if (els.checkoutCancelar)
     els.checkoutCancelar.addEventListener("click", cerrarCheckout);
-  if (els.formCheckout)
+  if (els.formCheckout) {
     els.formCheckout.addEventListener("submit", confirmarCheckout);
+    els.formCheckout
+      .querySelectorAll('input[name="moneda_pago"]')
+      .forEach((r) => r.addEventListener("change", actualizarMonedaCheckout));
+    if (els.checkoutTasaTipo)
+      els.checkoutTasaTipo.addEventListener("change", recargarPreviewCheckout);
+  }
 
   await loadHabitaciones();
 }
@@ -200,7 +231,75 @@ function abrirCheckin(habId) {
   if (els.checkinTitulo)
     els.checkinTitulo.textContent = `Check-in habitación #${h.numero}`;
   if (els.checkinTarifa) els.checkinTarifa.value = h.precio_usd;
+  if (els.checkinNoches) els.checkinNoches.value = 1;
+  // Por defecto, hoy → mañana.
+  const hoy = new Date();
+  const hoyIso = hoy.toISOString().slice(0, 10);
+  const mananaIso = new Date(hoy.getTime() + 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const inputIn = els.formCheckin.querySelector('input[name="fecha_checkin"]');
+  const inputOut = els.formCheckin.querySelector(
+    'input[name="fecha_checkout_estimado"]',
+  );
+  if (inputIn && !inputIn.value) inputIn.value = hoyIso;
+  if (inputOut && !inputOut.value) inputOut.value = mananaIso;
   els.modalCheckin.classList.remove("hidden");
+  recalcCheckin();
+}
+
+function diferenciaNoches(fechaIn, fechaOut) {
+  if (!fechaIn || !fechaOut) return null;
+  const d1 = new Date(fechaIn);
+  const d2 = new Date(fechaOut);
+  if (Number.isNaN(d1.getTime()) || Number.isNaN(d2.getTime())) return null;
+  const diff = Math.round((d2 - d1) / 86400000);
+  return diff > 0 ? diff : null;
+}
+
+let recalcTimer = null;
+async function recalcCheckin() {
+  if (!els.formCheckin || !els.checkinHabId) return;
+  const habId = Number(els.checkinHabId.value);
+  if (!habId) return;
+  const fd = new FormData(els.formCheckin);
+  const fechaIn = fd.get("fecha_checkin")?.toString() || "";
+  const fechaOut = fd.get("fecha_checkout_estimado")?.toString() || "";
+  // Si hay ambas fechas y se cambió alguna, sincronizamos `noches`.
+  const nochesPorFecha = diferenciaNoches(fechaIn, fechaOut);
+  if (nochesPorFecha && els.checkinNoches) {
+    els.checkinNoches.value = nochesPorFecha;
+  }
+  const noches = Math.max(1, Number(els.checkinNoches?.value || 1));
+  const tarifa = Number(els.checkinTarifa?.value || 0) || null;
+  const tasaTipo = els.checkinTasaTipo?.value || "bcv";
+
+  // Debounce simple para no inundar el backend mientras se tipea.
+  if (recalcTimer) clearTimeout(recalcTimer);
+  recalcTimer = setTimeout(async () => {
+    try {
+      const params = new URLSearchParams({
+        noches: String(noches),
+        tasa_tipo: tasaTipo,
+      });
+      if (tarifa) params.set("tarifa_usd", String(tarifa));
+      const url = `/habitaciones/${habId}/checkin-cotizacion?${params}`;
+      const cot = await get(url);
+      if (els.checkinTotalNoches)
+        els.checkinTotalNoches.textContent = cot.noches;
+      if (els.checkinTotalUnit)
+        els.checkinTotalUnit.textContent = formatUsd(cot.precio_unit_usd);
+      if (els.checkinTotalUsd)
+        els.checkinTotalUsd.textContent = formatUsd(cot.total_usd);
+      if (els.checkinTotalBs)
+        els.checkinTotalBs.textContent = formatBs(cot.total_bs);
+      if (els.checkinTasaInfo)
+        els.checkinTasaInfo.textContent = `Tasa ${cot.tasa_tipo.toUpperCase()}: ${Number(cot.tasa_aplicada).toFixed(2)} Bs/USD`;
+    } catch (error) {
+      if (els.checkinTasaInfo)
+        els.checkinTasaInfo.textContent = `Error: ${error.message}`;
+    }
+  }, 150);
 }
 
 function cerrarCheckin() {
@@ -245,26 +344,60 @@ async function abrirCheckout(habId) {
   if (!els.modalCheckout) return;
   els.formCheckout?.reset();
   if (els.checkoutHabId) els.checkoutHabId.value = habId;
+  // Reset radios: USD por defecto.
+  const radioUsd = els.formCheckout.querySelector(
+    'input[name="moneda_pago"][value="usd"]',
+  );
+  if (radioUsd) radioUsd.checked = true;
+  if (els.checkoutTasaRow) els.checkoutTasaRow.classList.add("hidden");
   els.checkoutResumen.innerHTML = `<p class="text-sm text-slate-500">Calculando total…</p>`;
   els.modalCheckout.classList.remove("hidden");
+  await recargarPreviewCheckout();
+}
+
+async function recargarPreviewCheckout() {
+  const habId = Number(els.checkoutHabId?.value);
+  if (!habId) return;
+  const moneda =
+    els.formCheckout.querySelector('input[name="moneda_pago"]:checked')?.value ||
+    "usd";
+  const tasaTipo = els.checkoutTasaTipo?.value || "bcv";
   try {
-    const preview = await get(`/habitaciones/${habId}/checkout-preview`);
-    els.checkoutResumen.innerHTML = renderPreview(preview);
+    const preview = await get(
+      `/habitaciones/${habId}/checkout-preview?tasa_tipo=${tasaTipo}`,
+    );
+    els.checkoutResumen.innerHTML = renderPreview(preview, moneda);
   } catch (error) {
     els.checkoutResumen.innerHTML = `<p class="text-sm text-red-600">${error.message}</p>`;
   }
 }
 
-function renderPreview(p) {
+function actualizarMonedaCheckout() {
+  const moneda =
+    els.formCheckout.querySelector('input[name="moneda_pago"]:checked')?.value ||
+    "usd";
+  if (els.checkoutTasaRow) {
+    els.checkoutTasaRow.classList.toggle("hidden", moneda !== "bs");
+  }
+  recargarPreviewCheckout();
+}
+
+function renderPreview(p, moneda = "usd") {
   const pedidos = p.pedidos?.length
     ? `<p class="text-xs text-slate-500">Pedidos asociados: ${p.pedidos.map((id) => `#${id}`).join(", ")}</p>`
     : "";
+  const totalDestacado =
+    moneda === "bs"
+      ? `<strong>Total a cobrar: ${formatBs(p.total_bs)}</strong>
+         <p class="text-xs text-slate-500">Tasa ${p.tasa_tipo?.toUpperCase()}: ${Number(p.tasa_aplicada || 0).toFixed(2)} Bs/USD · equivalente ${formatUsd(p.total_usd)}</p>`
+      : `<strong>Total a cobrar: ${formatUsd(p.total_usd)}</strong>
+         <p class="text-xs text-slate-500">Sin tasa (efectivo en dólares)</p>`;
   return `
     <p><strong>Habitación #${p.numero}</strong>${p.huesped ? ` · ${p.huesped}` : ""}</p>
     <ul class="text-sm space-y-1 mt-2">
-      <li>Estadía (${p.noches} noche${p.noches === 1 ? "" : "s"}): ${formatUsd(p.tarifa_usd)} · ${formatBs(p.tarifa_bs)}</li>
-      <li>Consumos: ${formatUsd(p.consumos_usd)} · ${formatBs(p.consumos_bs)}</li>
-      <li class="border-t pt-1"><strong>Total a cobrar: ${formatUsd(p.total_usd)} · ${formatBs(p.total_bs)}</strong></li>
+      <li>Estadía (${p.noches} noche${p.noches === 1 ? "" : "s"}): ${formatUsd(p.tarifa_usd)}${moneda === "bs" ? ` · ${formatBs(p.tarifa_bs)}` : ""}</li>
+      <li>Consumos: ${formatUsd(p.consumos_usd)}${moneda === "bs" ? ` · ${formatBs(p.consumos_bs)}` : ""}</li>
+      <li class="border-t pt-1">${totalDestacado}</li>
     </ul>
     ${pedidos}
   `;
@@ -278,20 +411,21 @@ async function confirmarCheckout(event) {
   event.preventDefault();
   const formData = new FormData(els.formCheckout);
   const habId = Number(formData.get("habitacion_id"));
+  const moneda = formData.get("moneda_pago")?.toString() || "usd";
   const payload = {
-    metodo_pago: formData.get("metodo_pago") || "bs",
+    moneda_pago: moneda,
+    metodo_pago: formData.get("metodo_pago")?.toString() || "efectivo",
+    tasa_tipo: moneda === "bs" ? formData.get("tasa_tipo") || "bcv" : "bcv",
     cuenta_banco_id: Number(formData.get("cuenta_banco_id")) || null,
-    monto_recibido_bs: Number(formData.get("monto_recibido_bs") || 0),
-    monto_recibido_usd: Number(formData.get("monto_recibido_usd") || 0),
-    tasa_tipo: formData.get("tasa_tipo") || "bcv",
     notas: formData.get("notas")?.toString() || null,
   };
   try {
     const resp = await post(`/habitaciones/${habId}/checkout`, payload);
-    showToast(
-      `Check-out OK · Total ${formatUsd(resp.total_usd)} (${formatBs(resp.total_bs)})`,
-      "success",
-    );
+    const msg =
+      moneda === "usd"
+        ? `Check-out OK · Cobrado ${formatUsd(resp.total_usd)} en USD`
+        : `Check-out OK · Cobrado ${formatBs(resp.total_bs)} (tasa ${resp.tasa_tipo?.toUpperCase()})`;
+    showToast(msg, "success");
     cerrarCheckout();
     await loadHabitaciones();
   } catch (error) {

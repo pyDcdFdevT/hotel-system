@@ -13,6 +13,7 @@ import { getCacheTasas, refreshHeaderTasas } from "./config.js";
 const STORAGE_KEY = "hotel-pos-state-v1";
 
 const CATEGORIAS_ORDEN = [
+  "Piscina",
   "Para Picar",
   "Desayunos",
   "A la Carta",

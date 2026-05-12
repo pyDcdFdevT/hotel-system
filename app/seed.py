@@ -178,7 +178,16 @@ MENU = [
     ("Margarita", "bar", "Cockeles", Decimal("6.00"), None),
     ("Daiquiri", "bar", "Cockeles", Decimal("6.00"), None),
     ("Cuba Libre", "bar", "Cockeles", Decimal("5.00"), None),
+
+    # ---------------- PISCINA ----------------
+    # Acceso al área de piscina (productos virtuales con stock alto).
+    ("Entrada Piscina - Niño", "bar", "Piscina", Decimal("3.00"), "<12 años"),
+    ("Entrada Piscina - Adulto", "bar", "Piscina", Decimal("4.00"), "12+ años"),
 ]
+
+
+# Productos con stock virtual (no se agotan).
+PRODUCTOS_VIRTUALES = {"Entrada Piscina - Niño", "Entrada Piscina - Adulto"}
 
 
 PRODUCTOS_MENU = [
@@ -191,9 +200,10 @@ PRODUCTOS_MENU = [
         "precio_usd": precio_usd,
         "precio_bs": _precio_bs(precio_usd),
         "costo_bs": Decimal("0"),
-        # Stock inicial razonable; ajustable luego desde Inventario.
-        "stock_actual": Decimal("100"),
-        "stock_minimo": Decimal("5"),
+        # Stock virtual alto para productos no inventariables
+        # (entradas de piscina, etc.); resto un stock razonable.
+        "stock_actual": Decimal("999") if nombre in PRODUCTOS_VIRTUALES else Decimal("100"),
+        "stock_minimo": Decimal("0") if nombre in PRODUCTOS_VIRTUALES else Decimal("5"),
         "unidad": "unidad",
         "es_para_venta": True,
     }

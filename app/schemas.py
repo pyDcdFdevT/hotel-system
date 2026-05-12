@@ -114,11 +114,15 @@ class HabitacionCheckinRequest(BaseModel):
 class HabitacionCheckoutRequest(BaseModel):
     """Check-out + cobro de la habitación (estadía + consumos)."""
 
-    metodo_pago: str = Field(default="bs", min_length=2, max_length=20)
+    moneda_pago: str = Field(default="usd", min_length=2, max_length=10)
+    """``usd`` (efectivo en dólares, sin aplicar tasa) o ``bs`` (efectivo en bolívares)."""
+    metodo_pago: Optional[str] = Field(default=None, max_length=20)
+    """Método específico de pago (efectivo, transferencia, pagomovil, mixto...)."""
+    tasa_tipo: Optional[str] = Field(default=None, max_length=20)
+    """Si ``moneda_pago='bs'``, qué tasa aplicar para convertir USD→Bs (``bcv`` o ``paralelo``)."""
     cuenta_banco_id: Optional[int] = Field(default=None, gt=0)
     monto_recibido_bs: Decimal = Field(default=Decimal("0"), ge=0)
     monto_recibido_usd: Decimal = Field(default=Decimal("0"), ge=0)
-    tasa_tipo: Optional[str] = Field(default=None, max_length=20)
     notas: Optional[str] = None
 
 
@@ -136,6 +140,8 @@ class HabitacionCheckoutPreview(BaseModel):
     consumos_bs: Decimal = Decimal("0")
     total_usd: Decimal = Decimal("0")
     total_bs: Decimal = Decimal("0")
+    tasa_tipo: str = "bcv"
+    tasa_aplicada: Decimal = Decimal("0")
     pedidos: List[int] = []
 
 

@@ -216,15 +216,30 @@
               <input type="date" name="fecha_checkout_estimado" class="w-full border rounded px-2 py-1" />
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-3 gap-2">
             <div>
               <label class="text-xs uppercase text-slate-500">Noches</label>
-              <input type="number" name="noches" min="1" value="1" class="w-full border rounded px-2 py-1" />
+              <input id="checkin-noches" type="number" name="noches" min="1" value="1" class="w-full border rounded px-2 py-1" />
             </div>
             <div>
-              <label class="text-xs uppercase text-slate-500">Tarifa USD</label>
+              <label class="text-xs uppercase text-slate-500">Precio / noche USD</label>
               <input id="checkin-tarifa" type="number" step="0.01" name="tarifa_usd" class="w-full border rounded px-2 py-1" />
             </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Tasa Bs</label>
+              <select id="checkin-tasa-tipo" class="w-full border rounded px-2 py-1">
+                <option value="bcv">BCV</option>
+                <option value="paralelo">Paralelo</option>
+              </select>
+            </div>
+          </div>
+          <div id="checkin-total" class="border rounded p-3 bg-emerald-50 text-sm">
+            <p>Noches: <strong id="checkin-total-noches">1</strong> · Precio: <strong id="checkin-total-unit">$ 0.00</strong></p>
+            <p class="text-base mt-1">
+              Total: <strong id="checkin-total-usd">$ 0.00</strong>
+              · <span id="checkin-total-bs" class="text-slate-700">Bs 0.00</span>
+            </p>
+            <p class="text-xs text-slate-500" id="checkin-tasa-info">Tasa: --</p>
           </div>
           <div>
             <label class="text-xs uppercase text-slate-500">Notas</label>
@@ -242,36 +257,37 @@
         <form id="form-checkout" class="card p-5 w-full max-w-md space-y-3">
           <h3 class="text-lg font-semibold">Check-out y cobro</h3>
           <input type="hidden" id="checkout-habitacion-id" name="habitacion_id" />
+
+          <p class="text-xs uppercase text-slate-500">¿El huésped pagó en USD o en Bs?</p>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <label class="border rounded p-2 flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="moneda_pago" value="usd" checked /> 💵 Efectivo USD
+            </label>
+            <label class="border rounded p-2 flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="moneda_pago" value="bs" /> 💴 Efectivo Bs
+            </label>
+          </div>
+
+          <div id="checkout-tasa-row" class="hidden">
+            <label class="text-xs uppercase text-slate-500">Tasa a aplicar (Bs)</label>
+            <select id="checkout-tasa-tipo" name="tasa_tipo" class="w-full border rounded px-2 py-1">
+              <option value="bcv">BCV</option>
+              <option value="paralelo">Paralelo</option>
+            </select>
+          </div>
+
           <div id="checkout-resumen" class="border rounded p-3 bg-slate-50"></div>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Método</label>
-              <select name="metodo_pago" class="w-full border rounded px-2 py-1">
-                <option value="bs">Bolívares</option>
-                <option value="usd">Dólares</option>
-                <option value="mixto">Mixto</option>
-                <option value="transferencia">Transferencia</option>
-                <option value="pagomovil">Pago Móvil</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Tasa</label>
-              <select name="tasa_tipo" class="w-full border rounded px-2 py-1">
-                <option value="bcv">BCV</option>
-                <option value="paralelo">Paralelo</option>
-              </select>
-            </div>
+
+          <div>
+            <label class="text-xs uppercase text-slate-500">Método de pago</label>
+            <select name="metodo_pago" class="w-full border rounded px-2 py-1">
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="pagomovil">Pago Móvil</option>
+              <option value="mixto">Mixto</option>
+            </select>
           </div>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Recibido Bs</label>
-              <input type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Recibido USD</label>
-              <input type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
-            </div>
-          </div>
+
           <div>
             <label class="text-xs uppercase text-slate-500">Notas</label>
             <input name="notas" class="w-full border rounded px-2 py-1" />

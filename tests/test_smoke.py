@@ -224,6 +224,74 @@ def test_estados_habitaciones(client):
     )
 
 
+def test_entradas_piscina_seed(client):
+    productos = client.get("/api/productos/").json()
+    piscina = [p for p in productos if p["categoria"] == "Piscina"]
+    nombres = {p["nombre"]: p for p in piscina}
+    assert "Entrada Piscina - Niño" in nombres
+    assert "Entrada Piscina - Adulto" in nombres
+    assert float(nombres["Entrada Piscina - Niño"]["precio_usd"]) == 3.00
+    assert float(nombres["Entrada Piscina - Adulto"]["precio_usd"]) == 4.00
+    # Stock virtual alto.
+    for p in piscina:
+        assert float(p["stock_actual"]) >= 999
+        assert p["area"] == "bar"
+
+
+def test_checkin_cotizacion(client):
+    habs = client.get("/api/habitaciones/").json()
+    libre = next(h for h in habs if h["estado"] == "disponible" and h["numero"] == "104")
+    # 3 noches BCV.
+    cot = client.get(
+        f"/api/habitaciones/{libre['id']}/checkin-cotizacion",
+        params={"noches": 3, "tasa_tipo": "bcv"},
+    )
+    assert cot.status_code == 200, cot.text
+    body = cot.json()
+    assert body["noches"] == 3
+    assert float(body["precio_unit_usd"]) == 20.00
+    assert float(body["total_usd"]) == 60.00
+    # total_bs = 60 * tasa BCV
+    assert float(body["total_bs"]) == round(60.00 * float(body["tasa_aplicada"]), 2)
+
+
+def test_checkout_moneda_pago_usd_y_bs(client):
+    # Reservar dos habitaciones distintas para evitar conflictos.
+    habs = client.get("/api/habitaciones/").json()
+    hab_usd = next(h for h in habs if h["estado"] == "disponible" and h["numero"] == "105")
+    hab_bs = next(h for h in habs if h["estado"] == "disponible" and h["numero"] == "106")
+
+    # ---- Caso 1: pago en USD (sin tasa) ----
+    client.post(
+        f"/api/habitaciones/{hab_usd['id']}/checkin",
+        json={"huesped": "Pago Dólares", "noches": 1},
+    )
+    resp = client.post(
+        f"/api/habitaciones/{hab_usd['id']}/checkout",
+        json={"moneda_pago": "usd"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert float(body["total_usd"]) == 20.00
+    # tasa_tipo se mantiene en bcv pero el cobro es 100% USD.
+
+    # ---- Caso 2: pago en Bs con tasa paralelo ----
+    client.post(
+        f"/api/habitaciones/{hab_bs['id']}/checkin",
+        json={"huesped": "Pago Bolívares", "noches": 2},
+    )
+    resp = client.post(
+        f"/api/habitaciones/{hab_bs['id']}/checkout",
+        json={"moneda_pago": "bs", "tasa_tipo": "paralelo"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["tasa_tipo"] == "paralelo"
+    # total_bs = 40 USD * tasa paralelo (415 según seed)
+    esperado_bs = round(40.00 * float(body["tasa_aplicada"]), 2)
+    assert float(body["total_bs"]) == esperado_bs
+
+
 def test_checkin_checkout(client):
     habs = client.get("/api/habitaciones/").json()
     libre = next(
@@ -276,7 +344,7 @@ def test_checkin_checkout(client):
     # Check-out.
     resp_out = client.post(
         f"/api/habitaciones/{libre['id']}/checkout",
-        json={"metodo_pago": "usd", "monto_recibido_usd": preview["total_usd"]},
+        json={"moneda_pago": "usd"},
     )
     assert resp_out.status_code == 200, resp_out.text
 

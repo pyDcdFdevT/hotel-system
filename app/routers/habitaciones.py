@@ -17,7 +17,7 @@ from app.models import (
     caracas_now,
     today,
 )
-from app.services.tasa_service import obtener_tasa_bcv
+from app.services.tasa_service import obtener_tasa_bcv, obtener_tasa_dia
 from app.schemas import (
     HabitacionCheckinRequest,
     HabitacionCheckoutPreview,
@@ -162,16 +162,21 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
         noches = max(1, int(data.noches or 1))
         fecha_out = data.fecha_checkout_estimado or (fecha_in + timedelta(days=noches))
 
-        tarifa_usd = (
-            Decimal(data.tarifa_usd) if data.tarifa_usd is not None else Decimal(habitacion.precio_usd or 0)
+        # Precio unitario por noche: lo recibido o el de la habitaci?n.
+        precio_unit_usd = (
+            Decimal(data.tarifa_usd)
+            if data.tarifa_usd is not None
+            else Decimal(habitacion.precio_usd or 0)
         )
+        # Almacenamos la tarifa total de la estad?a (precio ? noches).
+        tarifa_usd = (precio_unit_usd * noches).quantize(Decimal("0.01"))
+
         if data.tarifa_bs is not None:
+            # Si se especifica un total Bs expl?cito, resp?telo.
             tarifa_bs = Decimal(data.tarifa_bs)
         else:
-            tarifa_bs = Decimal(habitacion.precio_bs or 0)
-            if not tarifa_bs:
-                tasa = obtener_tasa_bcv(db)
-                tarifa_bs = (tarifa_usd * Decimal(tasa)).quantize(Decimal("0.01"))
+            tasa = obtener_tasa_bcv(db)
+            tarifa_bs = (tarifa_usd * Decimal(tasa)).quantize(Decimal("0.01"))
 
         reserva = Reserva(
             habitacion_id=habitacion.id,
@@ -202,20 +207,30 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
 # ---------------------------------------------------------------------------
 # Check-out: total estad?a + consumos
 # ---------------------------------------------------------------------------
-def _calcular_preview(db: Session, habitacion: Habitacion) -> HabitacionCheckoutPreview:
+TIPOS_TASA_VALIDOS = {"bcv", "paralelo"}
+MONEDAS_PAGO_VALIDAS = {"usd", "bs"}
+
+
+def _calcular_preview(
+    db: Session,
+    habitacion: Habitacion,
+    tasa_tipo: str = "bcv",
+) -> HabitacionCheckoutPreview:
+    tasa_tipo = (tasa_tipo or "bcv").lower().strip()
+    if tasa_tipo not in TIPOS_TASA_VALIDOS:
+        tasa_tipo = "bcv"
+
     reserva = _reserva_activa(db, habitacion.id)
 
     consumos_bs = Decimal("0")
     consumos_usd = Decimal("0")
     pedidos_ids: list[int] = []
 
-    # Consumos ya cargados a una reserva activa.
     if reserva:
         for consumo in reserva.consumos:
             consumos_bs += Decimal(consumo.monto_bs or 0)
             consumos_usd += Decimal(consumo.monto_usd or 0)
 
-    # Pedidos abiertos asociados al n?mero de habitaci?n (cuenta sin check-in previo).
     pedidos_abiertos = (
         db.query(Pedido)
         .filter(Pedido.habitacion_numero == habitacion.numero)
@@ -227,8 +242,19 @@ def _calcular_preview(db: Session, habitacion: Habitacion) -> HabitacionCheckout
         consumos_usd += Decimal(pedido.total_usd or 0)
         pedidos_ids.append(pedido.id)
 
-    tarifa_bs = Decimal(reserva.tarifa_bs or 0) if reserva else Decimal("0")
     tarifa_usd = Decimal(reserva.tarifa_usd or 0) if reserva else Decimal("0")
+
+    # Tasa de referencia del d?a (BCV o paralelo seg?n lo pedido).
+    tasa_aplicada = Decimal(obtener_tasa_dia(db, tipo=tasa_tipo))
+
+    # Los importes en bol?vares se recalculan SIEMPRE con la tasa solicitada
+    # para que el monto a cobrar refleje la moneda elegida en el check-out,
+    # independientemente de la tasa usada al check-in.
+    tarifa_bs = (tarifa_usd * tasa_aplicada).quantize(Decimal("0.01"))
+    consumos_bs = (consumos_usd * tasa_aplicada).quantize(Decimal("0.01"))
+
+    total_usd = (tarifa_usd + consumos_usd).quantize(Decimal("0.01"))
+    total_bs = (total_usd * tasa_aplicada).quantize(Decimal("0.01"))
 
     return HabitacionCheckoutPreview(
         habitacion_id=habitacion.id,
@@ -240,16 +266,64 @@ def _calcular_preview(db: Session, habitacion: Habitacion) -> HabitacionCheckout
         tarifa_bs=tarifa_bs,
         consumos_usd=consumos_usd,
         consumos_bs=consumos_bs,
-        total_usd=(tarifa_usd + consumos_usd).quantize(Decimal("0.01")),
-        total_bs=(tarifa_bs + consumos_bs).quantize(Decimal("0.01")),
+        total_usd=total_usd,
+        total_bs=total_bs,
+        tasa_tipo=tasa_tipo,
+        tasa_aplicada=tasa_aplicada,
         pedidos=pedidos_ids,
     )
 
 
 @router.get("/{habitacion_id}/checkout-preview", response_model=HabitacionCheckoutPreview)
-def checkout_preview(habitacion_id: int, db: Session = Depends(get_db)):
+def checkout_preview(
+    habitacion_id: int,
+    tasa_tipo: str = "bcv",
+    db: Session = Depends(get_db),
+):
     habitacion = _cargar_habitacion(db, habitacion_id)
-    return _calcular_preview(db, habitacion)
+    return _calcular_preview(db, habitacion, tasa_tipo=tasa_tipo)
+
+
+@router.get("/{habitacion_id}/checkin-cotizacion")
+def checkin_cotizacion(
+    habitacion_id: int,
+    noches: int = 1,
+    tasa_tipo: str = "bcv",
+    tarifa_usd: Optional[float] = None,
+    db: Session = Depends(get_db),
+):
+    """Calcula el total a cobrar dada una habitaci?n, noches y tarifa.
+
+    Si ``tarifa_usd`` viene en query, se usa ese precio; en caso contrario,
+    se toma el ``precio_usd`` de la habitaci?n. Devuelve tambi?n el equivalente
+    en bol?vares seg?n la tasa seleccionada (BCV o paralelo).
+    """
+    habitacion = _cargar_habitacion(db, habitacion_id)
+    tasa_tipo = (tasa_tipo or "bcv").lower().strip()
+    if tasa_tipo not in TIPOS_TASA_VALIDOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"tasa_tipo inv?lido. Use: {sorted(TIPOS_TASA_VALIDOS)}",
+        )
+    noches = max(1, int(noches or 1))
+    precio_unit_usd = (
+        Decimal(str(tarifa_usd)) if tarifa_usd is not None
+        else Decimal(habitacion.precio_usd or 0)
+    )
+    tasa = Decimal(obtener_tasa_dia(db, tipo=tasa_tipo))
+    total_usd = (precio_unit_usd * noches).quantize(Decimal("0.01"))
+    total_bs = (total_usd * tasa).quantize(Decimal("0.01"))
+    return {
+        "habitacion_id": habitacion.id,
+        "numero": habitacion.numero,
+        "noches": noches,
+        "precio_unit_usd": precio_unit_usd,
+        "precio_unit_bs": (precio_unit_usd * tasa).quantize(Decimal("0.01")),
+        "total_usd": total_usd,
+        "total_bs": total_bs,
+        "tasa_tipo": tasa_tipo,
+        "tasa_aplicada": tasa,
+    }
 
 
 @router.post("/{habitacion_id}/checkout", response_model=HabitacionCheckoutPreview)
@@ -258,6 +332,19 @@ def checkout(
     data: HabitacionCheckoutRequest,
     db: Session = Depends(get_db),
 ):
+    moneda_pago = (data.moneda_pago or "usd").lower().strip()
+    if moneda_pago not in MONEDAS_PAGO_VALIDAS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"moneda_pago inv?lida. Use: {sorted(MONEDAS_PAGO_VALIDAS)}",
+        )
+    tasa_tipo = (data.tasa_tipo or "bcv").lower().strip()
+    if tasa_tipo not in TIPOS_TASA_VALIDOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"tasa_tipo inv?lido. Use: {sorted(TIPOS_TASA_VALIDOS)}",
+        )
+
     habitacion = _cargar_habitacion(db, habitacion_id)
     reserva = _reserva_activa(db, habitacion_id)
     pedidos_abiertos = (
@@ -275,19 +362,33 @@ def checkout(
         )
 
     try:
-        preview = _calcular_preview(db, habitacion)
+        preview = _calcular_preview(db, habitacion, tasa_tipo=tasa_tipo)
 
-        # Cerrar todos los pedidos abiertos en habitaci?n con el mismo m?todo.
+        # M?todo de pago efectivo:
+        #   - Si paga en USD, no se aplica tasa (efectivo d?lares).
+        #   - Si paga en Bs, se convierte usando la tasa elegida (BCV o paralelo).
+        metodo_pago = (data.metodo_pago or moneda_pago).lower().strip()
+
+        if moneda_pago == "usd":
+            pagado_usd_total = preview.total_usd
+            pagado_bs_total = Decimal("0")
+        else:
+            pagado_usd_total = Decimal("0")
+            pagado_bs_total = preview.total_bs
+
         ahora = caracas_now()
         for pedido in pedidos_abiertos:
             pedido.estado = "pagado"
-            pedido.metodo_pago = data.metodo_pago
+            pedido.metodo_pago = metodo_pago
             pedido.cuenta_banco_id = data.cuenta_banco_id
-            pedido.pagado_bs = Decimal(pedido.total_bs or 0)
-            pedido.pagado_usd = Decimal(pedido.total_usd or 0)
+            if moneda_pago == "usd":
+                pedido.pagado_usd = Decimal(pedido.total_usd or 0)
+                pedido.pagado_bs = Decimal("0")
+            else:
+                pedido.pagado_bs = Decimal(pedido.total_bs or 0)
+                pedido.pagado_usd = Decimal("0")
             pedido.updated_at = ahora
 
-        # Cerrar reserva si existe.
         if reserva:
             reserva.fecha_checkout_real = today()
             reserva.estado = "cerrada"
@@ -301,7 +402,13 @@ def checkout(
         habitacion.updated_at = ahora
 
         db.commit()
-        return preview
+        # Devolvemos preview enriquecido con los totales pagados reales.
+        preview_resp = preview.model_copy(
+            update={
+                "tasa_tipo": tasa_tipo,
+            }
+        )
+        return preview_resp
     except HTTPException:
         db.rollback()
         raise

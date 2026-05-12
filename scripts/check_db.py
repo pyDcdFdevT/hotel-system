@@ -295,6 +295,67 @@ def _migrar_pedidos_habitacion(engine) -> None:
             )
 
 
+def _seed_productos_piscina(engine) -> None:
+    """Inserta los productos 'Entrada Piscina' si no existen (idempotente)."""
+    from sqlalchemy import text
+
+    productos = [
+        ("Entrada Piscina - Niño", "<12 años", "3.00"),
+        ("Entrada Piscina - Adulto", "12+ años", "4.00"),
+    ]
+
+    with engine.begin() as conn:
+        existe = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='productos'")
+        ).first()
+        if not existe and _is_sqlite(engine):
+            return
+
+        # Tasa BCV actual para calcular precio_bs (si todavía no existe la
+        # tabla `tasas_cambio` usamos el default histórico).
+        tasa = 405.35
+        try:
+            tasa_row = conn.execute(
+                text(
+                    "SELECT usd_a_ves FROM tasas_cambio "
+                    "WHERE tipo = 'bcv' ORDER BY fecha DESC LIMIT 1"
+                )
+            ).first()
+            if tasa_row and tasa_row[0]:
+                tasa = float(tasa_row[0])
+        except Exception:
+            tasa = 405.35
+
+        for nombre, porcion, precio_usd_str in productos:
+            ya = conn.execute(
+                text("SELECT 1 FROM productos WHERE nombre = :nombre"),
+                {"nombre": nombre},
+            ).first()
+            if ya:
+                continue
+            precio_usd = float(precio_usd_str)
+            precio_bs = round(precio_usd * tasa, 2)
+            print(f"[check_db] Insertando producto virtual: {nombre} ({precio_usd_str} USD)")
+            conn.execute(
+                text(
+                    "INSERT INTO productos ("
+                    "  nombre, categoria, area, porcion, precio_bs, precio_usd, "
+                    "  costo_bs, stock_actual, stock_minimo, unidad, "
+                    "  es_para_venta, activo, created_at, updated_at"
+                    ") VALUES ("
+                    "  :nombre, 'Piscina', 'bar', :porcion, :precio_bs, :precio_usd, "
+                    "  0, 999, 0, 'unidad', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+                    ")"
+                ),
+                {
+                    "nombre": nombre,
+                    "porcion": porcion,
+                    "precio_bs": precio_bs,
+                    "precio_usd": precio_usd,
+                },
+            )
+
+
 def _actualizar_precio_habitaciones(engine) -> None:
     """Cambia el precio de las habitaciones que aún están en el viejo default ($40)."""
     from sqlalchemy import text
@@ -336,6 +397,7 @@ def main() -> None:
     _actualizar_precio_habitaciones(engine)
     _migrar_estados_habitaciones(engine)
     _migrar_pedidos_habitacion(engine)
+    _seed_productos_piscina(engine)
 
     print("[check_db] Ejecutando create_all…")
     Base.metadata.create_all(bind=engine)
