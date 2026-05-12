@@ -1,14 +1,72 @@
 const API_BASE = "/api";
+const TOKEN_KEY = "hotel-token";
+const USER_KEY = "hotel-usuario";
+
+export function getToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+export function setToken(token) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch (_e) {
+    /* ignore */
+  }
+}
+
+export function getUsuario() {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+export function setUsuario(usuario) {
+  try {
+    if (usuario) localStorage.setItem(USER_KEY, JSON.stringify(usuario));
+    else localStorage.removeItem(USER_KEY);
+  } catch (_e) {
+    /* ignore */
+  }
+}
+
+export function clearSession() {
+  setToken(null);
+  setUsuario(null);
+}
+
+export function redirectToLogin() {
+  clearSession();
+  if (!window.location.pathname.endsWith("/login.html") &&
+      window.location.pathname !== "/login") {
+    window.location.href = "/login.html";
+  }
+}
 
 async function request(method, endpoint, data) {
-  const options = {
-    method,
-    headers: { "Content-Type": "application/json" },
-  };
+  const headers = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const options = { method, headers };
   if (data !== undefined && data !== null) {
     options.body = JSON.stringify(data);
   }
   const response = await fetch(`${API_BASE}${endpoint}`, options);
+  if (response.status === 401) {
+    redirectToLogin();
+    throw new Error("Sesión expirada");
+  }
+  if (response.status === 403) {
+    const text = await response.json().catch(() => ({}));
+    throw new Error(text.detail || "Acceso denegado para este rol");
+  }
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json")
     ? await response.json().catch(() => null)

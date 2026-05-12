@@ -21,8 +21,10 @@ from app.models import (
     Producto,
     Receta,
     TasaCambio,
+    Usuario,
     today,
 )
+from app.routers.auth import hash_pin
 
 
 TASA_INICIAL_BCV = Decimal("405.35")
@@ -78,6 +80,33 @@ CUENTAS_RENOMBRADAS = {
     "EfectivoBs": "Efectivo Bs",
     "EfectivoUsd": "Efectivo USD",
 }
+
+
+USUARIOS_INICIALES = [
+    {"nombre": "Administrador", "pin": "1234", "rol": "admin"},
+    {"nombre": "Recepcion", "pin": "1111", "rol": "recepcion"},
+    {"nombre": "Mesero", "pin": "2222", "rol": "mesero"},
+    {"nombre": "Cocina", "pin": "3333", "rol": "cocina"},
+]
+
+
+def _seed_usuarios(db) -> None:
+    for u in USUARIOS_INICIALES:
+        existente = db.query(Usuario).filter(Usuario.nombre == u["nombre"]).first()
+        if existente:
+            # Reaplica el rol/activo por si fue editado a un valor inválido,
+            # pero no resetea el PIN si ya fue cambiado manualmente.
+            existente.rol = existente.rol or u["rol"]
+            existente.activo = True
+            continue
+        db.add(
+            Usuario(
+                nombre=u["nombre"],
+                pin_hash=hash_pin(u["pin"]),
+                rol=u["rol"],
+                activo=True,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +304,8 @@ def seed() -> None:
 
         for hab in HABITACIONES_INICIALES:
             _upsert(db, Habitacion, {"numero": hab["numero"]}, hab)
+
+        _seed_usuarios(db)
 
         # Productos del menú
         productos_por_nombre: dict[str, Producto] = {}

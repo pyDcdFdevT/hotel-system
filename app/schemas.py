@@ -292,6 +292,7 @@ class PedidoOut(ORMModel):
     habitacion_numero: Optional[str] = None
     reserva_id: Optional[int] = None
     estado: str
+    estado_cocina: Optional[str] = "pendiente"
     fecha: datetime
     tasa_usd_del_dia: Decimal
     total_bs: Decimal
@@ -461,3 +462,61 @@ class ResumenDia(BaseModel):
     ocupacion_porcentaje: float
     productos_bajo_stock: int
     tasa_dia: Decimal
+
+
+# ---------------------------------------------------------------------------
+# Auth / Usuarios
+# ---------------------------------------------------------------------------
+class LoginRequest(BaseModel):
+    pin: str = Field(..., min_length=3, max_length=12)
+
+
+class UsuarioPublico(BaseModel):
+    id: int
+    nombre: str
+    rol: str
+
+
+class LoginResponse(BaseModel):
+    success: bool
+    usuario: UsuarioPublico
+    token: str
+    mensaje: Optional[str] = None
+
+
+class UsuarioOut(ORMModel):
+    id: int
+    nombre: str
+    rol: str
+    activo: bool
+    ultimo_acceso: Optional[datetime] = None
+    created_at: datetime
+
+
+class UsuarioCreate(BaseModel):
+    nombre: str = Field(..., min_length=2, max_length=100)
+    pin: str = Field(..., min_length=3, max_length=12)
+    rol: str = Field(..., min_length=3, max_length=20)
+    activo: bool = True
+
+
+class UsuarioUpdate(BaseModel):
+    nombre: Optional[str] = None
+    pin: Optional[str] = None
+    rol: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class CocinaEstadoUpdate(BaseModel):
+    estado_cocina: str = Field(..., min_length=3, max_length=20)
+
+
+class LogAccesoOut(ORMModel):
+    id: int
+    usuario_id: Optional[int] = None
+    usuario_nombre: Optional[str] = None
+    accion: Optional[str] = None
+    detalle: Optional[str] = None
+    ip: Optional[str] = None
+    exitoso: bool
+    created_at: datetime

@@ -7,6 +7,117 @@ def test_health(client):
     assert response.json() == {"status": "ok", "service": "hotel-system"}
 
 
+# ---------------------------------------------------------------------------
+# Auth / Roles
+# ---------------------------------------------------------------------------
+def test_login_correcto(anon_client):
+    resp = anon_client.post("/api/auth/login", json={"pin": "1234"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["usuario"]["rol"] == "admin"
+    assert body["token"]
+
+    # /me funciona con ese token.
+    me = anon_client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {body['token']}"}
+    )
+    assert me.status_code == 200
+    assert me.json()["nombre"] == "Administrador"
+
+
+def test_login_incorrecto(anon_client):
+    resp = anon_client.post("/api/auth/login", json={"pin": "0000"})
+    assert resp.status_code == 401
+    # Log de intento fallido (lo lee admin).
+    admin = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()
+    logs = anon_client.get(
+        "/api/auth/logs",
+        headers={"Authorization": f"Bearer {admin['token']}"},
+    ).json()
+    fallidos = [log for log in logs if log["accion"] == "login" and not log["exitoso"]]
+    assert fallidos, "Esperaba al menos un log de login fallido"
+
+
+def test_proteccion_rutas(anon_client):
+    # Sin token: 401 en cualquier ruta protegida.
+    sin_token = anon_client.get("/api/habitaciones/")
+    assert sin_token.status_code == 401
+
+    # Login como mesero.
+    token = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Mesero puede leer pedidos pero NO inventario.
+    assert anon_client.get("/api/pedidos/activos", headers=headers).status_code == 200
+    inv = anon_client.get("/api/inventario/movimientos", headers=headers)
+    assert inv.status_code == 403
+
+    # Mesero NO puede crear productos.
+    nuevo = anon_client.post(
+        "/api/productos/",
+        json={
+            "nombre": "Test Mesero",
+            "categoria": "Otros",
+            "precio_bs": 1,
+            "precio_usd": 1,
+        },
+        headers=headers,
+    )
+    assert nuevo.status_code == 403
+
+
+def test_cocina_pedidos(anon_client):
+    # Admin crea un pedido con un producto de cocina.
+    admin_token = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()["token"]
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    productos = anon_client.get("/api/productos/", headers=admin).json()
+    pan = next(p for p in productos if p["nombre"] == "Tequeños")
+    pedido = anon_client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Cocina Test",
+            "items": [{"producto_id": pan["id"], "cantidad": 1}],
+        },
+        headers=admin,
+    ).json()
+    assert pedido["estado_cocina"] == "pendiente"
+
+    # Cocina lee la cola.
+    cocina_token = anon_client.post("/api/auth/login", json={"pin": "3333"}).json()["token"]
+    cocina = {"Authorization": f"Bearer {cocina_token}"}
+    cola = anon_client.get("/api/pedidos/activos-cocina", headers=cocina)
+    assert cola.status_code == 200
+    ids = [p["id"] for p in cola.json()]
+    assert pedido["id"] in ids
+
+    # Cocina NO puede entrar a reportes (rol distinto).
+    rep = anon_client.get("/api/reportes/resumen-dia", headers=cocina)
+    assert rep.status_code == 403
+
+    # Cocina marca el pedido como listo.
+    listo = anon_client.put(
+        f"/api/pedidos/{pedido['id']}/cocina-estado",
+        json={"estado_cocina": "listo"},
+        headers=cocina,
+    )
+    assert listo.status_code == 200
+    assert listo.json()["estado_cocina"] == "listo"
+
+    # Tras marcar listo, ya no aparece en pendientes.
+    cola2 = anon_client.get("/api/pedidos/activos-cocina", headers=cocina).json()
+    assert pedido["id"] not in [p["id"] for p in cola2]
+
+
+def test_logout_invalida_token(anon_client):
+    token = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    assert anon_client.get("/api/auth/me", headers=headers).status_code == 200
+    anon_client.post("/api/auth/logout", headers=headers)
+    assert anon_client.get("/api/auth/me", headers=headers).status_code == 401
+
+
 def test_tasa_default(client):
     response = client.get("/api/tasa/actual")
     assert response.status_code == 200

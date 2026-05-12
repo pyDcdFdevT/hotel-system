@@ -89,6 +89,38 @@ ESTADOS_HABITACION = (
 
 
 # ---------------------------------------------------------------------------
+# Usuarios / Auditoría
+# ---------------------------------------------------------------------------
+ROLES_VALIDOS = ("admin", "recepcion", "mesero", "cocina")
+
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+    __table_args__ = (UniqueConstraint("nombre", name="uq_usuario_nombre"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String(100), nullable=False, unique=True, index=True)
+    pin_hash = Column(String(128), nullable=False)
+    rol = Column(String(20), nullable=False, index=True)
+    activo = Column(Boolean, default=True, nullable=False)
+    ultimo_acceso = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=caracas_now, nullable=False)
+
+
+class LogAcceso(Base):
+    __tablename__ = "logs_acceso"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True, index=True)
+    usuario_nombre = Column(String(100))
+    accion = Column(String(50), index=True)
+    detalle = Column(String(500))
+    ip = Column(String(45))
+    exitoso = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=caracas_now, nullable=False, index=True)
+
+
+# ---------------------------------------------------------------------------
 # Reservas y consumos
 # ---------------------------------------------------------------------------
 class Reserva(Base):
@@ -212,6 +244,7 @@ class Pedido(Base):
     habitacion_numero = Column(String(10), index=True)
     reserva_id = Column(Integer, ForeignKey("reservas.id"), index=True)
     estado = Column(String(20), default="abierto", nullable=False, index=True)
+    estado_cocina = Column(String(20), default="pendiente", nullable=False, index=True)
     fecha = Column(DateTime, default=caracas_now, nullable=False, index=True)
     tasa_usd_del_dia = Column(Numeric(12, 4), default=0, nullable=False)
     total_bs = Column(Numeric(12, 2), default=0, nullable=False)

@@ -247,7 +247,7 @@ def _migrar_estados_habitaciones(engine) -> None:
 
 
 def _migrar_pedidos_habitacion(engine) -> None:
-    """Añade columna ``habitacion_numero`` a la tabla ``pedidos`` (cuenta por habitación)."""
+    """Añade columna ``habitacion_numero`` y ``estado_cocina`` a ``pedidos``."""
     if not _is_sqlite(engine):
         return
     from sqlalchemy import text
@@ -269,6 +269,28 @@ def _migrar_pedidos_habitacion(engine) -> None:
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_pedidos_habitacion_numero "
                     "ON pedidos (habitacion_numero)"
+                )
+            )
+        if "estado_cocina" not in columnas:
+            print("[check_db] Migrando pedidos: añadiendo columna 'estado_cocina'…")
+            conn.execute(
+                text(
+                    "ALTER TABLE pedidos ADD COLUMN estado_cocina VARCHAR(20) "
+                    "NOT NULL DEFAULT 'pendiente'"
+                )
+            )
+            # Pedidos viejos que ya están pagados se marcan como entregados
+            # para que no aparezcan en la pantalla de cocina.
+            conn.execute(
+                text(
+                    "UPDATE pedidos SET estado_cocina = 'entregado' "
+                    "WHERE estado IN ('pagado', 'cargado')"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_pedidos_estado_cocina "
+                    "ON pedidos (estado_cocina)"
                 )
             )
 

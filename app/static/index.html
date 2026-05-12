@@ -14,25 +14,32 @@
         <h1 class="text-2xl font-bold">Hotel · Gestión Integral</h1>
         <p class="text-sm opacity-80">Habitaciones, reservas, POS, inventario y gastos</p>
       </div>
-      <div class="text-right text-sm">
-        <p class="text-xs uppercase tracking-wider opacity-80">Tasas USD → Bs</p>
-        <p class="font-semibold">
-          BCV: <span id="header-tasa-bcv">--</span> Bs
-          <span class="opacity-50 mx-1">|</span>
-          Paralelo: <span id="header-tasa-paralelo">--</span> Bs
-        </p>
-        <p class="text-xs opacity-70" id="header-tasa-fecha"></p>
+      <div class="flex items-center gap-4">
+        <div class="text-right text-sm">
+          <p class="text-xs uppercase tracking-wider opacity-80">Tasas USD → Bs</p>
+          <p class="font-semibold">
+            BCV: <span id="header-tasa-bcv">--</span> Bs
+            <span class="opacity-50 mx-1">|</span>
+            Paralelo: <span id="header-tasa-paralelo">--</span> Bs
+          </p>
+          <p class="text-xs opacity-70" id="header-tasa-fecha"></p>
+        </div>
+        <div class="text-right text-sm border-l border-white/20 pl-4">
+          <p id="header-usuario" class="font-semibold">--</p>
+          <p class="text-xs opacity-70" id="header-rol">--</p>
+          <button id="btn-logout" class="text-xs underline opacity-80 hover:opacity-100">Cerrar sesión</button>
+        </div>
       </div>
     </div>
     <nav class="bg-slate-900/60">
-      <div class="max-w-7xl mx-auto px-4 flex flex-wrap gap-1">
-        <button class="tab-btn active text-sm px-4 py-2 text-white" data-tab="dashboard">Inicio</button>
-        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="habitaciones">Habitaciones</button>
-        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="reservas">Reservas</button>
-        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="pos">Ventas</button>
-        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="inventario">Inventario</button>
-        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="gastos">Gastos</button>
-        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="config">Tasas</button>
+      <div class="max-w-7xl mx-auto px-4 flex flex-wrap gap-1" id="tabs-nav">
+        <button class="tab-btn active text-sm px-4 py-2 text-white" data-tab="dashboard" data-roles="admin,recepcion,mesero">Inicio</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="habitaciones" data-roles="admin,recepcion">Habitaciones</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="reservas" data-roles="admin,recepcion">Reservas</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="pos" data-roles="admin,recepcion,mesero">Ventas</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="inventario" data-roles="admin">Inventario</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="gastos" data-roles="admin">Gastos</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="config" data-roles="admin">Tasas</button>
       </div>
     </nav>
   </header>
@@ -877,13 +884,54 @@
   <div id="toast-container" class="fixed bottom-4 right-4 z-50"></div>
 
   <script type="module">
-    import { loadDashboard } from "/static/js/dashboard.js";
-    import { initHabitaciones } from "/static/js/habitaciones.js";
-    import { initReservas } from "/static/js/reservas.js";
-    import { initPedidos } from "/static/js/pedidos.js";
-    import { initInventario } from "/static/js/inventario.js";
-    import { initGastos } from "/static/js/gastos.js";
-    import { initConfig, refreshHeaderTasas } from "/static/js/config.js";
+    import {
+      getToken,
+      getUsuario,
+      clearSession,
+      redirectToLogin,
+    } from "/static/js/api.js";
+
+    // -------- Guarda de sesión --------
+    if (!getToken()) {
+      redirectToLogin();
+      throw new Error("Redirigiendo a login…");
+    }
+    const usuario = getUsuario() || { nombre: "?", rol: "?" };
+    if (usuario.rol === "cocina") {
+      window.location.href = "/cocina.html";
+      throw new Error("Redirigiendo a cocina…");
+    }
+
+    document.getElementById("header-usuario").textContent = usuario.nombre;
+    document.getElementById("header-rol").textContent = usuario.rol;
+    document.getElementById("btn-logout").addEventListener("click", async () => {
+      try {
+        await fetch("/api/auth/logout", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+      } catch (_e) { /* ignore */ }
+      clearSession();
+      redirectToLogin();
+    });
+
+    // -------- Ocultar pestañas según rol --------
+    const tabsNav = document.getElementById("tabs-nav");
+    Array.from(tabsNav.querySelectorAll(".tab-btn")).forEach((btn) => {
+      const permitidos = (btn.dataset.roles || "").split(",").map((r) => r.trim());
+      if (!permitidos.includes(usuario.rol)) {
+        btn.classList.add("hidden");
+      }
+    });
+
+    // -------- Importar módulos --------
+    const { loadDashboard } = await import("/static/js/dashboard.js");
+    const { initHabitaciones } = await import("/static/js/habitaciones.js");
+    const { initReservas } = await import("/static/js/reservas.js");
+    const { initPedidos } = await import("/static/js/pedidos.js");
+    const { initInventario } = await import("/static/js/inventario.js");
+    const { initGastos } = await import("/static/js/gastos.js");
+    const { initConfig, refreshHeaderTasas } = await import("/static/js/config.js");
 
     const tabs = document.querySelectorAll(".tab-btn");
     const panels = document.querySelectorAll(".tab-panel");
@@ -913,7 +961,24 @@
 
     refreshHeaderTasas();
     setInterval(() => refreshHeaderTasas(), 60_000);
-    activate("dashboard");
+
+    // Primera pestaña visible según rol.
+    const primeraVisible = Array.from(tabs).find((b) => !b.classList.contains("hidden"));
+    if (primeraVisible) activate(primeraVisible.dataset.tab);
+
+    // -------- Auto-logout por inactividad (30 min) --------
+    let inactividadTimer;
+    function resetInactividad() {
+      clearTimeout(inactividadTimer);
+      inactividadTimer = setTimeout(() => {
+        clearSession();
+        redirectToLogin();
+      }, 30 * 60 * 1000);
+    }
+    ["click", "mousemove", "keypress", "touchstart"].forEach((evt) =>
+      document.addEventListener(evt, resetInactividad, { passive: true }),
+    );
+    resetInactividad();
   </script>
 </body>
 </html>

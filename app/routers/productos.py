@@ -17,6 +17,7 @@ from app.models import (
     Receta,
     caracas_now,
 )
+from app.routers.auth import require_roles
 from app.schemas import (
     ProductoCreate,
     ProductoOut,
@@ -109,7 +110,12 @@ def obtener(producto_id: int, db: Session = Depends(get_db)):
     return producto
 
 
-@router.post("/", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=ProductoOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles("admin"))],
+)
 def crear(data: ProductoCreate, db: Session = Depends(get_db)):
     try:
         producto = Producto(**data.model_dump())
@@ -125,7 +131,11 @@ def crear(data: ProductoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error creando producto: {exc}") from exc
 
 
-@router.put("/{producto_id}", response_model=ProductoOut)
+@router.put(
+    "/{producto_id}",
+    response_model=ProductoOut,
+    dependencies=[Depends(require_roles("admin"))],
+)
 def actualizar(producto_id: int, data: ProductoUpdate, db: Session = Depends(get_db)):
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if not producto:
@@ -144,7 +154,11 @@ def actualizar(producto_id: int, data: ProductoUpdate, db: Session = Depends(get
         raise HTTPException(status_code=500, detail=f"Error actualizando producto: {exc}") from exc
 
 
-@router.delete("/{producto_id}", status_code=status.HTTP_200_OK)
+@router.delete(
+    "/{producto_id}",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles("admin"))],
+)
 def eliminar(producto_id: int, db: Session = Depends(get_db)):
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if not producto:
@@ -204,7 +218,12 @@ def obtener_receta(producto_id: int, db: Session = Depends(get_db)):
     return db.query(Receta).filter(Receta.producto_id == producto_id).all()
 
 
-@router.post("/recetas", response_model=List[RecetaOut], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/recetas",
+    response_model=List[RecetaOut],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles("admin"))],
+)
 def definir_receta(data: RecetaCreate, db: Session = Depends(get_db)):
     producto = db.query(Producto).filter(Producto.id == data.producto_id).first()
     if not producto:

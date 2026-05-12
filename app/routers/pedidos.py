@@ -18,7 +18,9 @@ from app.models import (
     Reserva,
     utc_now,
 )
+from app.routers.auth import require_roles
 from app.schemas import (
+    CocinaEstadoUpdate,
     PedidoCargoHabitacion,
     PedidoCreate,
     PedidoOut,
@@ -85,6 +87,65 @@ def listar_activos(db: Session = Depends(get_db)):
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error listando pedidos activos: {exc}") from exc
+
+
+@router.get(
+    "/activos-cocina",
+    dependencies=[Depends(require_roles("admin", "cocina"))],
+)
+def listar_pedidos_cocina(db: Session = Depends(get_db)):
+    """Pedidos abiertos pendientes para cocina/bar (sin precios)."""
+    pedidos = (
+        db.query(Pedido)
+        .options(joinedload(Pedido.detalles).joinedload(DetallePedido.producto))
+        .filter(Pedido.estado == "abierto")
+        .filter(Pedido.estado_cocina.in_(["pendiente", "en_preparacion"]))
+        .order_by(Pedido.fecha.asc())
+        .all()
+    )
+    return [
+        {
+            "id": p.id,
+            "mesa": p.mesa,
+            "habitacion_numero": p.habitacion_numero,
+            "tipo": p.tipo,
+            "estado_cocina": p.estado_cocina,
+            "fecha": p.fecha.isoformat() if p.fecha else None,
+            "detalles": [
+                {
+                    "cantidad": float(d.cantidad),
+                    "producto_nombre": d.producto.nombre if d.producto else f"#{d.producto_id}",
+                    "area": d.producto.area if d.producto else None,
+                }
+                for d in p.detalles
+            ],
+        }
+        for p in pedidos
+    ]
+
+
+@router.put(
+    "/{pedido_id}/cocina-estado",
+    response_model=PedidoOut,
+    dependencies=[Depends(require_roles("admin", "cocina"))],
+)
+def actualizar_estado_cocina(
+    pedido_id: int,
+    data: CocinaEstadoUpdate,
+    db: Session = Depends(get_db),
+):
+    valid = {"pendiente", "en_preparacion", "listo", "entregado"}
+    if data.estado_cocina not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Estado cocina inválido. Use: {sorted(valid)}",
+        )
+    pedido = _cargar_pedido(db, pedido_id)
+    pedido.estado_cocina = data.estado_cocina
+    pedido.updated_at = utc_now()
+    db.commit()
+    db.expire_all()
+    return _cargar_pedido(db, pedido_id)
 
 
 @router.get("/por-habitacion/{numero}", response_model=List[PedidoOut])
