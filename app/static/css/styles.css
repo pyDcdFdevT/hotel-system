@@ -432,24 +432,37 @@ th {
   background: rgba(248, 250, 252, 0.95);
   border: 1px solid #cbd5e1;
   border-radius: 9999px;
-  width: 1.5rem;
-  height: 1.5rem;
-  font-size: 0.7rem;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  padding: 0 0.4rem;
+  font-size: 0.78rem;
   color: #475569;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.1rem;
   line-height: 1;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  z-index: 2;
 }
 .pos-fav-toggle:hover {
   background-color: #fde68a;
   color: #92400e;
+  transform: scale(1.05);
+}
+.btn-quitar-fav.pos-fav-toggle {
+  /* Botón "quitar" más compacto: sólo ✖ */
+  width: 1.6rem;
+  padding: 0;
 }
 .btn-quitar-fav.pos-fav-toggle:hover {
   background-color: #fecaca;
   color: #991b1b;
+}
+.btn-agregar-fav.pos-fav-toggle {
+  /* El botón "agregar" muestra ＋⭐ y necesita más ancho. */
+  font-weight: 600;
 }
 
 /* Contenedor con scroll para el acordeón de categorías en POS. */
