@@ -1052,3 +1052,152 @@ def test_pago_anticipado_parcial(client):
         json={"opcion_pago": "efectivo_usd"},
     ).json()
     assert abs(float(cierre["total_usd"]) - esperado_pendiente) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Late check-out se refleja en Inicio
+# ---------------------------------------------------------------------------
+def test_late_checkout_reflejo_inicio(client):
+    """Late check-out: las horas extra deben aparecer en ventas-por-area."""
+    hab = _habitacion_disponible(client)
+
+    # Check-in básico, sin pago anticipado.
+    reserva = client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={"huesped": "Late Checkout Tester", "noches": 1},
+    )
+    assert reserva.status_code == 200, reserva.text
+
+    # Preview de check-out a las 16:00 → 3 horas extra ($15).
+    preview = client.get(
+        f"/api/habitaciones/{hab['id']}/checkout-preview?hora_salida=16:00"
+    ).json()
+    assert preview["horas_extra"] == 3
+    recarga_usd = float(preview["recarga_extra_usd"])
+    assert recarga_usd == 15.0
+
+    total_esperado_usd = float(preview["total_usd"])  # tarifa + consumos + recarga
+
+    cierre = client.post(
+        f"/api/habitaciones/{hab['id']}/checkout",
+        json={"opcion_pago": "efectivo_usd", "hora_salida": "16:00"},
+    )
+    assert cierre.status_code == 200, cierre.text
+
+    # El reporte del día debe incluir las horas extra en habitaciones.
+    data = client.get("/api/reportes/ventas-por-area-con-metodos").json()
+    habitaciones = data["habitaciones"]
+    assert float(habitaciones["total_usd"]) >= total_esperado_usd, (
+        f"Total habitaciones {habitaciones['total_usd']} < esperado {total_esperado_usd}"
+    )
+    # El método de pago debe registrar el cobro en USD efectivo.
+    metodos = habitaciones["metodos"]
+    assert "efectivo_usd" in metodos
+    assert float(metodos["efectivo_usd"]["usd"]) >= recarga_usd
+
+
+# ---------------------------------------------------------------------------
+# Reservas: documento y nacionalidad + cálculo de noches
+# ---------------------------------------------------------------------------
+def test_reserva_con_documento(client):
+    """Crear reserva con N/E y verificar persistencia de campos."""
+    hab = _habitacion_disponible(client)
+    fecha_in = "2026-12-01"
+    fecha_out = "2026-12-03"
+    payload = {
+        "habitacion_id": hab["id"],
+        "huesped": "Juan Extranjero",
+        "fecha_checkin": fecha_in,
+        "fecha_checkout_estimado": fecha_out,
+        "noches": 2,
+        "pais_origen": "España",
+        "tipo_documento": "E",
+        "numero_documento": "AB1234567",
+        "hora_ingreso": "15:30",
+        "vehiculo_modelo": "Toyota Corolla",
+        "vehiculo_color": "Blanco",
+        "vehiculo_placa": "AB123CD",
+    }
+    resp = client.post("/api/reservas/", json=payload)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["estado"] == "reservada"
+    assert body["pais_origen"] == "España"
+    assert body["tipo_documento"] == "E"
+    assert body["numero_documento"] == "AB1234567"
+    assert body["hora_ingreso"] == "15:30"
+    assert body["vehiculo_modelo"] == "Toyota Corolla"
+
+    # La habitación queda en estado 'reservada' (no ocupada).
+    refrescada = client.get(f"/api/habitaciones/{hab['id']}").json()
+    assert refrescada["estado"] == "reservada"
+
+    # GET /reservas/{id} expone los mismos campos.
+    detalle = client.get(f"/api/reservas/{body['id']}").json()
+    assert detalle["tipo_documento"] == "E"
+    assert detalle["numero_documento"] == "AB1234567"
+
+
+def test_reserva_calculo_noches(client):
+    """Reserva calcula correctamente noches × tarifa al crear."""
+    hab = _habitacion_disponible(client)
+    precio_unit = float(hab["precio_usd"])
+    payload = {
+        "habitacion_id": hab["id"],
+        "huesped": "Calculo Noches",
+        "fecha_checkin": "2026-11-01",
+        "fecha_checkout_estimado": "2026-11-06",
+        "noches": 5,
+    }
+    resp = client.post("/api/reservas/", json=payload)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    # tarifa_usd guardada = precio_unit × 5 noches.
+    esperado = round(precio_unit * 5, 2)
+    assert float(body["tarifa_usd"]) == esperado, (
+        f"tarifa_usd {body['tarifa_usd']} != esperado {esperado}"
+    )
+    assert body["noches"] == 5
+    assert body["estado"] == "reservada"
+
+
+def test_reserva_checkin_desde_reservada(client):
+    """Check-in con reserva_id convierte la reserva existente en activa."""
+    hab = _habitacion_disponible(client)
+    # 1. Crear reserva.
+    reserva = client.post(
+        "/api/reservas/",
+        json={
+            "habitacion_id": hab["id"],
+            "huesped": "Pre Reservado",
+            "fecha_checkin": "2026-10-10",
+            "fecha_checkout_estimado": "2026-10-12",
+            "noches": 2,
+            "pais_origen": "Venezuela",
+            "tipo_documento": "N",
+            "numero_documento": "V-12345678",
+        },
+    ).json()
+    assert reserva["estado"] == "reservada"
+    reserva_id = reserva["id"]
+
+    # 2. Hacer check-in pasando el reserva_id.
+    cierre = client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={
+            "huesped": "Pre Reservado",
+            "noches": 2,
+            "reserva_id": reserva_id,
+        },
+    )
+    assert cierre.status_code == 200, cierre.text
+    body = cierre.json()
+    # Debe haberse convertido la reserva en vez de crear una nueva.
+    assert body["id"] == reserva_id
+    assert body["estado"] == "activa"
+    # Los datos de huésped (documento, país) se conservaron.
+    assert body["numero_documento"] == "V-12345678"
+    assert body["tipo_documento"] == "N"
+    # La habitación ahora está ocupada.
+    refrescada = client.get(f"/api/habitaciones/{hab['id']}").json()
+    assert refrescada["estado"] == "ocupada"

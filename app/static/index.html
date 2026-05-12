@@ -225,13 +225,38 @@
         <form id="form-checkin" class="card p-5 w-full max-w-md space-y-3">
           <h3 class="text-lg font-semibold" id="checkin-titulo">Check-in</h3>
           <input type="hidden" id="checkin-habitacion-id" name="habitacion_id" />
+          <input type="hidden" id="checkin-reserva-id" name="reserva_id" />
           <div>
             <label class="text-xs uppercase text-slate-500">Huésped</label>
             <input name="huesped" required class="w-full border rounded px-2 py-1" />
           </div>
+          <fieldset class="border rounded p-3 space-y-2" id="checkin-datos-huesped">
+            <legend class="text-sm font-medium text-slate-700 px-1">📋 Datos del huésped</legend>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs uppercase text-slate-500">País de origen</label>
+                <input name="pais_origen" placeholder="Venezuela" class="w-full border rounded px-2 py-1" />
+              </div>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Tipo</label>
+                <div class="flex gap-3 text-sm pt-1.5">
+                  <label class="flex items-center gap-1">
+                    <input type="radio" name="tipo_documento" value="N" checked /> Nacional
+                  </label>
+                  <label class="flex items-center gap-1">
+                    <input type="radio" name="tipo_documento" value="E" /> Extranjero
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Número de documento</label>
+              <input name="numero_documento" placeholder="Cédula o Pasaporte" class="w-full border rounded px-2 py-1" />
+            </div>
+          </fieldset>
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label class="text-xs uppercase text-slate-500">Documento</label>
+              <label class="text-xs uppercase text-slate-500">Documento (alt)</label>
               <input name="documento" class="w-full border rounded px-2 py-1" />
             </div>
             <div>
@@ -429,7 +454,11 @@
     <section id="tab-reservas" class="tab-panel">
       <div class="grid lg:grid-cols-3 gap-6">
         <form id="form-reserva" class="card p-5 space-y-3">
-          <h2 class="text-lg font-semibold">Nuevo check-in</h2>
+          <h2 class="text-lg font-semibold">Nueva reserva</h2>
+          <p class="text-xs text-slate-500">
+            Crea una reserva por adelantado. La habitación quedará bloqueada
+            hasta que se haga el check-in.
+          </p>
           <div>
             <label class="text-xs uppercase text-slate-500">Habitación</label>
             <select id="reserva-habitacion" name="habitacion_id" required class="w-full border rounded px-2 py-1"></select>
@@ -438,54 +467,153 @@
             <label class="text-xs uppercase text-slate-500">Huésped</label>
             <input name="huesped" required class="w-full border rounded px-2 py-1" />
           </div>
-          <div class="grid grid-cols-2 gap-2">
+
+          <fieldset class="border rounded p-3 space-y-2">
+            <legend class="text-sm font-medium text-slate-700 px-1">📋 Datos del huésped</legend>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs uppercase text-slate-500">País de origen</label>
+                <input name="pais_origen" placeholder="Venezuela" class="w-full border rounded px-2 py-1" />
+              </div>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Tipo</label>
+                <div class="flex gap-3 text-sm pt-1.5">
+                  <label class="flex items-center gap-1">
+                    <input type="radio" name="tipo_documento" value="N" checked /> Nacional
+                  </label>
+                  <label class="flex items-center gap-1">
+                    <input type="radio" name="tipo_documento" value="E" /> Extranjero
+                  </label>
+                </div>
+              </div>
+            </div>
             <div>
-              <label class="text-xs uppercase text-slate-500">Documento</label>
-              <input name="documento" class="w-full border rounded px-2 py-1" />
+              <label class="text-xs uppercase text-slate-500">Número de documento</label>
+              <input name="numero_documento" placeholder="Cédula o Pasaporte" class="w-full border rounded px-2 py-1" />
             </div>
             <div>
               <label class="text-xs uppercase text-slate-500">Teléfono</label>
               <input name="telefono" class="w-full border rounded px-2 py-1" />
             </div>
+          </fieldset>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Fecha ingreso</label>
+              <input id="reserva-fecha-in" type="date" name="fecha_checkin" required class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Hora ingreso</label>
+              <input id="reserva-hora-in" type="time" name="hora_ingreso" value="15:00" class="w-full border rounded px-2 py-1" />
+            </div>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label class="text-xs uppercase text-slate-500">Check-in</label>
-              <input type="date" name="fecha_checkin" class="w-full border rounded px-2 py-1" />
+              <label class="text-xs uppercase text-slate-500">Fecha salida estimada</label>
+              <input id="reserva-fecha-out" type="date" name="fecha_checkout_estimado" required class="w-full border rounded px-2 py-1" />
             </div>
             <div>
-              <label class="text-xs uppercase text-slate-500">Check-out estimado</label>
-              <input type="date" name="fecha_checkout" required class="w-full border rounded px-2 py-1" />
+              <label class="text-xs uppercase text-slate-500">Hora salida estimada</label>
+              <input id="reserva-hora-out" type="time" name="hora_salida" value="13:00" class="w-full border rounded px-2 py-1" />
             </div>
           </div>
-          <div class="grid grid-cols-3 gap-2">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Noches</label>
-              <input type="number" name="noches" min="1" value="1" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Tarifa Bs</label>
-              <input type="number" step="0.01" name="tarifa_bs" value="0" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Tarifa USD</label>
-              <input type="number" step="0.01" name="tarifa_usd" value="0" class="w-full border rounded px-2 py-1" />
-            </div>
+
+          <div id="reserva-resumen" class="border rounded p-3 bg-emerald-50 text-sm">
+            <p>Noches: <strong id="reserva-noches">1</strong> · Precio/noche:
+              <strong id="reserva-precio-unit">$ 0.00</strong>
+            </p>
+            <p class="text-base mt-1">
+              Total: <strong id="reserva-total-usd">$ 0.00</strong>
+              · <span id="reserva-total-bs" class="text-slate-700">Bs 0.00</span>
+            </p>
           </div>
-          <button type="submit" class="w-full px-3 py-2 rounded bg-emerald-600 text-white">Registrar check-in</button>
+
+          <details class="border rounded p-2">
+            <summary class="cursor-pointer text-sm font-medium text-slate-700">
+              🚗 Vehículo (opcional)
+            </summary>
+            <div class="grid grid-cols-3 gap-2 mt-2">
+              <div>
+                <label class="text-xs uppercase text-slate-500">Modelo</label>
+                <input name="vehiculo_modelo" class="w-full border rounded px-2 py-1" placeholder="Toyota Corolla" />
+              </div>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Color</label>
+                <input name="vehiculo_color" class="w-full border rounded px-2 py-1" placeholder="Blanco" />
+              </div>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Placa</label>
+                <input name="vehiculo_placa" class="w-full border rounded px-2 py-1" placeholder="AB123CD" />
+              </div>
+            </div>
+          </details>
+
+          <fieldset class="border rounded p-3 space-y-2">
+            <legend class="text-sm font-medium text-slate-700 px-1">💰 Pago anticipado (opcional)</legend>
+            <div class="flex gap-3 text-sm">
+              <label class="flex items-center gap-1">
+                <input type="radio" name="pago_anticipado" value="0" checked /> Pagar al check-out
+              </label>
+              <label class="flex items-center gap-1">
+                <input type="radio" name="pago_anticipado" value="1" /> Pagar ahora
+              </label>
+            </div>
+            <div id="reserva-pago-detalle" class="hidden space-y-2">
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-xs uppercase text-slate-500">Moneda</label>
+                  <select id="reserva-pago-moneda" name="moneda_pago" class="w-full border rounded px-2 py-1">
+                    <option value="usd">USD</option>
+                    <option value="bs">Bolívares</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs uppercase text-slate-500">Método</label>
+                  <select id="reserva-pago-metodo" name="metodo_pago" class="w-full border rounded px-2 py-1">
+                    <option value="efectivo">💵 Efectivo</option>
+                    <option value="transferencia">💳 Transferencia</option>
+                    <option value="pagomovil">📱 Pago Móvil</option>
+                  </select>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div id="reserva-pago-usd-row">
+                  <label class="text-xs uppercase text-slate-500">Monto USD</label>
+                  <input id="reserva-pago-usd" type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
+                </div>
+                <div id="reserva-pago-bs-row" class="hidden">
+                  <label class="text-xs uppercase text-slate-500">Monto Bs</label>
+                  <input id="reserva-pago-bs" type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <button type="submit" class="w-full px-3 py-2 rounded bg-emerald-600 text-white">
+            Registrar reserva
+          </button>
         </form>
         <div class="card p-5 lg:col-span-2">
-          <h2 class="text-lg font-semibold mb-3">Reservas activas</h2>
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">Reservas</h2>
+            <select id="reservas-filtro-estado" class="border rounded px-2 py-1 text-sm">
+              <option value="">Activas + Reservadas</option>
+              <option value="reservada">Sólo reservadas</option>
+              <option value="activa">Sólo activas (check-in hecho)</option>
+            </select>
+          </div>
           <div class="overflow-x-auto">
             <table>
               <thead>
                 <tr>
                   <th>#</th>
                   <th>Huésped</th>
+                  <th>Doc</th>
                   <th>Hab</th>
                   <th>Entrada</th>
                   <th>Salida</th>
                   <th>Noches</th>
+                  <th>Estado</th>
                   <th>Total</th>
                   <th></th>
                 </tr>
@@ -496,43 +624,6 @@
         </div>
       </div>
 
-      <div id="modal-checkout" class="modal-backdrop hidden">
-        <form id="form-checkout" class="card p-5 w-full max-w-md space-y-3">
-          <h3 class="text-lg font-semibold">Checkout</h3>
-          <div id="checkout-resumen" class="text-sm space-y-1"></div>
-          <div>
-            <label class="text-xs uppercase text-slate-500">Método</label>
-            <select name="metodo_pago" class="w-full border rounded px-2 py-1">
-              <option value="bs">Bolívares</option>
-              <option value="usd">Dólares</option>
-              <option value="mixto">Mixto</option>
-              <option value="transferencia">Transferencia</option>
-            </select>
-          </div>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Recibido Bs</label>
-              <input type="number" step="0.01" name="monto_bs" value="0" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Recibido USD</label>
-              <input type="number" step="0.01" name="monto_usd" value="0" class="w-full border rounded px-2 py-1" />
-            </div>
-          </div>
-          <div>
-            <label class="text-xs uppercase text-slate-500">Cuenta banco</label>
-            <select id="checkout-cuenta" name="cuenta_banco_id" class="w-full border rounded px-2 py-1"></select>
-          </div>
-          <div>
-            <label class="text-xs uppercase text-slate-500">Notas</label>
-            <input name="notas" class="w-full border rounded px-2 py-1" />
-          </div>
-          <div class="flex justify-end gap-2 pt-2">
-            <button type="button" id="checkout-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
-            <button type="submit" class="px-3 py-1 bg-emerald-600 text-white rounded">Confirmar checkout</button>
-          </div>
-        </form>
-      </div>
     </section>
 
     <!-- Ventas (POS) -->

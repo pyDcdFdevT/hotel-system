@@ -136,6 +136,10 @@ class Reserva(Base):
     huesped = Column(String(120), nullable=False)
     documento = Column(String(40))
     telefono = Column(String(40))
+    # Datos del huésped (nacionalidad y documento de identidad).
+    pais_origen = Column(String(100), nullable=True)
+    tipo_documento = Column(String(20), nullable=True)  # "N" (Nacional) o "E" (Extranjero)
+    numero_documento = Column(String(50), nullable=True)
     fecha_checkin = Column(Date, default=today, nullable=False, index=True)
     fecha_checkout_estimado = Column(Date, nullable=False)
     fecha_checkout_real = Column(Date)

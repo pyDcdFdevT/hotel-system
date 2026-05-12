@@ -158,6 +158,29 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
             detail=f"Ya existe la reserva #{activa.id} activa para esta habitaci?n",
         )
 
+    # Si llega con reserva_id, validamos que sea una reserva previa
+    # (estado="reservada") asociada a esta habitaci?n. La convertiremos en
+    # vez de crear una nueva.
+    reserva_previa: Optional[Reserva] = None
+    if data.reserva_id:
+        reserva_previa = (
+            db.query(Reserva)
+            .filter(Reserva.id == data.reserva_id)
+            .first()
+        )
+        if not reserva_previa:
+            raise HTTPException(status_code=404, detail=f"Reserva #{data.reserva_id} no existe")
+        if reserva_previa.habitacion_id != habitacion.id:
+            raise HTTPException(
+                status_code=400,
+                detail="La reserva no pertenece a esta habitaci?n",
+            )
+        if reserva_previa.estado != "reservada":
+            raise HTTPException(
+                status_code=400,
+                detail=f"La reserva #{reserva_previa.id} no est? en estado 'reservada' (actual: {reserva_previa.estado})",
+            )
+
     try:
         fecha_in = data.fecha_checkin or today()
         noches = max(1, int(data.noches or 1))
@@ -226,27 +249,62 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
             else:
                 estado_pago = "pendiente"
 
-        reserva = Reserva(
-            habitacion_id=habitacion.id,
-            huesped=data.huesped,
-            documento=data.documento,
-            telefono=data.telefono,
-            fecha_checkin=fecha_in,
-            fecha_checkout_estimado=fecha_out,
-            noches=noches,
-            tarifa_bs=tarifa_bs,
-            tarifa_usd=tarifa_usd,
-            estado="activa",
-            vehiculo_modelo=(data.vehiculo_modelo or None),
-            vehiculo_color=(data.vehiculo_color or None),
-            vehiculo_placa=(data.vehiculo_placa or None),
-            hora_ingreso=(data.hora_ingreso or None),
-            pagado_parcial_usd=pagado_usd,
-            pagado_parcial_bs=pagado_bs,
-            estado_pago=estado_pago,
-            metodo_pago=metodo_pago_reserva,
-        )
-        db.add(reserva)
+        if reserva_previa is not None:
+            # Convertir reserva previa ? check-in efectivo.
+            reserva = reserva_previa
+            reserva.huesped = data.huesped or reserva.huesped
+            reserva.documento = data.documento or reserva.documento
+            reserva.telefono = data.telefono or reserva.telefono
+            reserva.fecha_checkin = fecha_in
+            reserva.fecha_checkout_estimado = fecha_out
+            reserva.noches = noches
+            reserva.tarifa_bs = tarifa_bs
+            reserva.tarifa_usd = tarifa_usd
+            reserva.estado = "activa"
+            reserva.vehiculo_modelo = data.vehiculo_modelo or reserva.vehiculo_modelo
+            reserva.vehiculo_color = data.vehiculo_color or reserva.vehiculo_color
+            reserva.vehiculo_placa = data.vehiculo_placa or reserva.vehiculo_placa
+            reserva.hora_ingreso = data.hora_ingreso or reserva.hora_ingreso
+            reserva.pais_origen = data.pais_origen or reserva.pais_origen
+            reserva.tipo_documento = data.tipo_documento or reserva.tipo_documento
+            reserva.numero_documento = data.numero_documento or reserva.numero_documento
+            # Si se env?a un nuevo pago anticipado, se suma al existente.
+            if data.pago_anticipado:
+                reserva.pagado_parcial_usd = Decimal(
+                    reserva.pagado_parcial_usd or 0
+                ) + pagado_usd
+                reserva.pagado_parcial_bs = Decimal(
+                    reserva.pagado_parcial_bs or 0
+                ) + pagado_bs
+                if metodo_pago_reserva:
+                    reserva.metodo_pago = metodo_pago_reserva
+                reserva.estado_pago = estado_pago
+            reserva.updated_at = caracas_now()
+        else:
+            reserva = Reserva(
+                habitacion_id=habitacion.id,
+                huesped=data.huesped,
+                documento=data.documento,
+                telefono=data.telefono,
+                fecha_checkin=fecha_in,
+                fecha_checkout_estimado=fecha_out,
+                noches=noches,
+                tarifa_bs=tarifa_bs,
+                tarifa_usd=tarifa_usd,
+                estado="activa",
+                vehiculo_modelo=(data.vehiculo_modelo or None),
+                vehiculo_color=(data.vehiculo_color or None),
+                vehiculo_placa=(data.vehiculo_placa or None),
+                hora_ingreso=(data.hora_ingreso or None),
+                pais_origen=(data.pais_origen or None),
+                tipo_documento=(data.tipo_documento or None),
+                numero_documento=(data.numero_documento or None),
+                pagado_parcial_usd=pagado_usd,
+                pagado_parcial_bs=pagado_bs,
+                estado_pago=estado_pago,
+                metodo_pago=metodo_pago_reserva,
+            )
+            db.add(reserva)
 
         habitacion.estado = "ocupada"
         db.commit()

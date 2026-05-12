@@ -261,17 +261,34 @@ async function onSubmit(event) {
 // ---------------------------------------------------------------------------
 // Check-in
 // ---------------------------------------------------------------------------
-function abrirCheckin(habId) {
+/**
+ * Abre el modal de check-in.
+ * @param {number} habId - id de la habitación.
+ * @param {{reserva?: object, habitaciones?: object[]}} [opts]
+ */
+export function abrirCheckin(habId, opts = {}) {
+  if (Array.isArray(opts.habitaciones) && opts.habitaciones.length) {
+    habitaciones = opts.habitaciones;
+  }
   const h = habitaciones.find((x) => x.id === habId);
   if (!h) return;
   if (!els.modalCheckin) return;
   els.formCheckin?.reset();
+  const reserva = opts.reserva || null;
+  const reservaInput = document.getElementById("checkin-reserva-id");
+  if (reservaInput) reservaInput.value = reserva?.id || "";
   if (els.checkinHabId) els.checkinHabId.value = h.id;
-  if (els.checkinTitulo)
-    els.checkinTitulo.textContent = `Check-in habitación #${h.numero}`;
-  if (els.checkinTarifa) els.checkinTarifa.value = h.precio_usd;
-  if (els.checkinNoches) els.checkinNoches.value = 1;
-  // Por defecto, hoy → mañana.
+  if (els.checkinTitulo) {
+    els.checkinTitulo.textContent = reserva
+      ? `Check-in de reserva #${reserva.id} · habitación #${h.numero}`
+      : `Check-in habitación #${h.numero}`;
+  }
+  if (els.checkinTarifa)
+    els.checkinTarifa.value = reserva?.tarifa_usd
+      ? Number(reserva.tarifa_usd) / Math.max(1, reserva.noches || 1)
+      : h.precio_usd;
+  if (els.checkinNoches) els.checkinNoches.value = reserva?.noches || 1;
+  // Por defecto, hoy → mañana (o lo que dijera la reserva).
   const hoy = new Date();
   const hoyIso = hoy.toISOString().slice(0, 10);
   const mananaIso = new Date(hoy.getTime() + 86400000)
@@ -281,8 +298,29 @@ function abrirCheckin(habId) {
   const inputOut = els.formCheckin.querySelector(
     'input[name="fecha_checkout_estimado"]',
   );
-  if (inputIn && !inputIn.value) inputIn.value = hoyIso;
-  if (inputOut && !inputOut.value) inputOut.value = mananaIso;
+  if (inputIn) inputIn.value = reserva?.fecha_checkin || hoyIso;
+  if (inputOut) inputOut.value = reserva?.fecha_checkout_estimado || mananaIso;
+  // Pre-cargar datos del huésped.
+  if (reserva) {
+    const setVal = (name, v) => {
+      const el = els.formCheckin.querySelector(`[name="${name}"]`);
+      if (el && v != null) el.value = v;
+    };
+    setVal("huesped", reserva.huesped);
+    setVal("documento", reserva.documento);
+    setVal("telefono", reserva.telefono);
+    setVal("pais_origen", reserva.pais_origen);
+    setVal("numero_documento", reserva.numero_documento);
+    setVal("vehiculo_modelo", reserva.vehiculo_modelo);
+    setVal("vehiculo_color", reserva.vehiculo_color);
+    setVal("vehiculo_placa", reserva.vehiculo_placa);
+    setVal("hora_ingreso", reserva.hora_ingreso);
+    const tipo = reserva.tipo_documento || "N";
+    const tipoRadio = els.formCheckin.querySelector(
+      `input[name="tipo_documento"][value="${tipo}"]`,
+    );
+    if (tipoRadio) tipoRadio.checked = true;
+  }
   // Reseteamos el sub-bloque de pago anticipado (oculto por defecto).
   const radio = els.formCheckin?.querySelector(
     'input[name="pago_anticipado"][value="0"]',
@@ -382,6 +420,8 @@ async function confirmarCheckin(event) {
   event.preventDefault();
   const formData = new FormData(els.formCheckin);
   const habId = Number(formData.get("habitacion_id"));
+  const reservaIdRaw = formData.get("reserva_id");
+  const reservaId = reservaIdRaw ? Number(reservaIdRaw) : null;
   const pagoAnticipado = pagoAnticipadoActivo();
   const payload = {
     huesped: formData.get("huesped")?.toString().trim(),
@@ -396,7 +436,12 @@ async function confirmarCheckin(event) {
     vehiculo_color: formData.get("vehiculo_color")?.toString().trim() || null,
     vehiculo_placa: formData.get("vehiculo_placa")?.toString().trim() || null,
     hora_ingreso: formData.get("hora_ingreso")?.toString() || null,
+    pais_origen: formData.get("pais_origen")?.toString().trim() || null,
+    tipo_documento: formData.get("tipo_documento")?.toString() || null,
+    numero_documento:
+      formData.get("numero_documento")?.toString().trim() || null,
     pago_anticipado: pagoAnticipado,
+    reserva_id: reservaId,
   };
   if (pagoAnticipado) {
     payload.moneda_pago = formData.get("moneda_pago") || "usd";
@@ -420,6 +465,10 @@ async function confirmarCheckin(event) {
     showToast(mensaje, "success");
     cerrarCheckin();
     await loadHabitaciones();
+    // Permite que otras pestañas (ej. reservas) se enteren y refresquen.
+    document.dispatchEvent(
+      new CustomEvent("checkin:confirmado", { detail: { reserva } }),
+    );
   } catch (error) {
     showToast(`Error en check-in: ${error.message}`, "error");
   }

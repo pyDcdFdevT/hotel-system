@@ -322,6 +322,9 @@ def _migrar_reservas_vehiculo(engine) -> None:
             ("pagado_parcial_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
             ("pagado_parcial_bs", "NUMERIC(12, 2) NOT NULL DEFAULT 0"),
             ("estado_pago", "VARCHAR(20) NOT NULL DEFAULT 'pendiente'"),
+            ("pais_origen", "VARCHAR(100)"),
+            ("tipo_documento", "VARCHAR(20)"),
+            ("numero_documento", "VARCHAR(50)"),
         )
         for nombre, tipo in nuevos:
             if nombre not in columnas:

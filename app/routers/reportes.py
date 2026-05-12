@@ -395,6 +395,18 @@ def ventas_por_area_con_metodos(
         for r in reservas:
             usd = Decimal(r.total_final_usd or 0)
             bs = Decimal(r.total_final_bs or 0)
+            # Si la reserva no guardó el total (legacy o caso raro), lo
+            # reconstruimos a partir de la tarifa y el recargo por horas extra
+            # para que las ventas del día reflejen el late check-out.
+            if usd == 0 and bs == 0:
+                usd = (
+                    Decimal(r.tarifa_usd or 0)
+                    + Decimal(r.recarga_extra_usd or 0)
+                ).quantize(Decimal("0.01"))
+                bs = (
+                    Decimal(r.tarifa_bs or 0)
+                    + Decimal(r.recarga_extra_bs or 0)
+                ).quantize(Decimal("0.01"))
             if usd == 0 and bs == 0:
                 continue
             etiqueta = _clasificar_metodo(r.metodo_pago, usd, bs)

@@ -92,6 +92,18 @@ class ReservaCreate(BaseModel):
     vehiculo_placa: Optional[str] = Field(default=None, max_length=20)
     hora_ingreso: Optional[str] = Field(default=None, max_length=10)
     hora_salida: Optional[str] = Field(default=None, max_length=10)
+    # Datos del huésped
+    pais_origen: Optional[str] = Field(default=None, max_length=100)
+    tipo_documento: Optional[str] = Field(default=None, max_length=20)
+    numero_documento: Optional[str] = Field(default=None, max_length=50)
+    notas: Optional[str] = Field(default=None, max_length=255)
+    # Pago anticipado (opcional, idéntico al check-in).
+    pago_anticipado: bool = False
+    moneda_pago: Optional[str] = Field(default=None, max_length=10)
+    metodo_pago: Optional[str] = Field(default=None, max_length=30)
+    monto_recibido_usd: Decimal = Field(default=Decimal("0"), ge=0)
+    monto_recibido_bs: Decimal = Field(default=Decimal("0"), ge=0)
+    tasa_tipo: Optional[str] = Field(default=None, max_length=20)
 
 
 class ReservaCheckout(BaseModel):
@@ -119,6 +131,13 @@ class HabitacionCheckinRequest(BaseModel):
     vehiculo_placa: Optional[str] = Field(default=None, max_length=20)
     hora_ingreso: Optional[str] = Field(default=None, max_length=10)
     """Hora manual de ingreso del huésped (formato ``HH:MM``)."""
+    # Datos del huésped (nacionalidad y documento).
+    pais_origen: Optional[str] = Field(default=None, max_length=100)
+    tipo_documento: Optional[str] = Field(default=None, max_length=20)
+    numero_documento: Optional[str] = Field(default=None, max_length=50)
+    # Si se llega con una reserva previa (estado="reservada"), pasar su id
+    # para convertirla en check-in activo en vez de crear una nueva.
+    reserva_id: Optional[int] = Field(default=None, gt=0)
 
     # ---- Pago anticipado opcional ----
     pago_anticipado: bool = False
@@ -220,6 +239,9 @@ class ReservaOut(ORMModel):
     pagado_parcial_usd: Decimal = Decimal("0")
     pagado_parcial_bs: Decimal = Decimal("0")
     estado_pago: str = "pendiente"
+    pais_origen: Optional[str] = None
+    tipo_documento: Optional[str] = None
+    numero_documento: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
