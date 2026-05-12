@@ -147,6 +147,10 @@ class Reserva(Base):
     total_final_bs = Column(Numeric(12, 2), default=0, nullable=False)
     total_final_usd = Column(Numeric(10, 2), default=0, nullable=False)
     estado = Column(String(20), default="activa", nullable=False, index=True)
+    # Datos opcionales del vehículo del huésped.
+    vehiculo_modelo = Column(String(100), nullable=True)
+    vehiculo_color = Column(String(50), nullable=True)
+    vehiculo_placa = Column(String(20), nullable=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 

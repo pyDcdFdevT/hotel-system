@@ -46,8 +46,22 @@ const els = {
   checkoutCancelar: document.getElementById("checkout-cancelar"),
   checkoutResumen: document.getElementById("checkout-resumen"),
   checkoutHabId: document.getElementById("checkout-habitacion-id"),
+  checkoutOpcionInput: document.getElementById("checkout-opcion-pago"),
+  checkoutOpciones: document.getElementById("checkout-opciones"),
   checkoutTasaRow: document.getElementById("checkout-tasa-row"),
   checkoutTasaTipo: document.getElementById("checkout-tasa-tipo"),
+  checkoutMixtoRow: document.getElementById("checkout-mixto-row"),
+  checkoutMixtoUsd: document.getElementById("checkout-mixto-usd"),
+  checkoutMixtoBs: document.getElementById("checkout-mixto-bs"),
+};
+
+// Mapeo opción → {moneda, metodo} (espejo del backend).
+const OPCIONES_PAGO = {
+  efectivo_usd: { moneda: "usd", metodo: "efectivo" },
+  efectivo_bs: { moneda: "bs", metodo: "efectivo" },
+  transferencia_bs: { moneda: "bs", metodo: "transferencia" },
+  pagomovil_bs: { moneda: "bs", metodo: "pagomovil" },
+  mixto: { moneda: "mixto", metodo: "mixto" },
 };
 
 let habitaciones = [];
@@ -81,12 +95,18 @@ export async function initHabitaciones() {
     els.checkoutCancelar.addEventListener("click", cerrarCheckout);
   if (els.formCheckout) {
     els.formCheckout.addEventListener("submit", confirmarCheckout);
-    els.formCheckout
-      .querySelectorAll('input[name="moneda_pago"]')
-      .forEach((r) => r.addEventListener("change", actualizarMonedaCheckout));
     if (els.checkoutTasaTipo)
       els.checkoutTasaTipo.addEventListener("change", recargarPreviewCheckout);
   }
+  if (els.checkoutOpciones) {
+    els.checkoutOpciones
+      .querySelectorAll(".checkout-opcion")
+      .forEach((btn) =>
+        btn.addEventListener("click", () => seleccionarOpcionPago(btn)),
+      );
+  }
+  if (els.checkoutMixtoUsd)
+    els.checkoutMixtoUsd.addEventListener("input", recargarPreviewCheckout);
 
   await loadHabitaciones();
 }
@@ -319,6 +339,9 @@ async function confirmarCheckin(event) {
     noches: Number(formData.get("noches") || 1),
     tarifa_usd: Number(formData.get("tarifa_usd") || 0) || null,
     notas: formData.get("notas")?.toString() || null,
+    vehiculo_modelo: formData.get("vehiculo_modelo")?.toString().trim() || null,
+    vehiculo_color: formData.get("vehiculo_color")?.toString().trim() || null,
+    vehiculo_placa: formData.get("vehiculo_placa")?.toString().trim() || null,
   };
   if (!payload.huesped) {
     showToast("Indique el nombre del huésped", "error");
@@ -344,59 +367,102 @@ async function abrirCheckout(habId) {
   if (!els.modalCheckout) return;
   els.formCheckout?.reset();
   if (els.checkoutHabId) els.checkoutHabId.value = habId;
-  // Reset radios: USD por defecto.
-  const radioUsd = els.formCheckout.querySelector(
-    'input[name="moneda_pago"][value="usd"]',
-  );
-  if (radioUsd) radioUsd.checked = true;
-  if (els.checkoutTasaRow) els.checkoutTasaRow.classList.add("hidden");
-  els.checkoutResumen.innerHTML = `<p class="text-sm text-slate-500">Calculando total…</p>`;
+  // Reseteamos al estado inicial: Efectivo USD.
+  seleccionarOpcionPagoPorClave("efectivo_usd");
+  if (els.checkoutResumen) {
+    els.checkoutResumen.innerHTML = `<p class="text-sm text-slate-500">Calculando total…</p>`;
+  }
   els.modalCheckout.classList.remove("hidden");
   await recargarPreviewCheckout();
+}
+
+function opcionActual() {
+  const clave = els.checkoutOpcionInput?.value || "efectivo_usd";
+  return { clave, ...(OPCIONES_PAGO[clave] || OPCIONES_PAGO.efectivo_usd) };
+}
+
+function seleccionarOpcionPagoPorClave(clave) {
+  const btn = els.checkoutOpciones?.querySelector(
+    `.checkout-opcion[data-opcion="${clave}"]`,
+  );
+  if (btn) seleccionarOpcionPago(btn);
+}
+
+function seleccionarOpcionPago(btn) {
+  if (!btn || !els.checkoutOpciones) return;
+  els.checkoutOpciones
+    .querySelectorAll(".checkout-opcion")
+    .forEach((b) => b.classList.remove("activa"));
+  btn.classList.add("activa");
+
+  const clave = btn.dataset.opcion;
+  const moneda = btn.dataset.moneda;
+  if (els.checkoutOpcionInput) els.checkoutOpcionInput.value = clave;
+
+  // Tasa visible cuando aplica Bs (incluye mixto).
+  if (els.checkoutTasaRow) {
+    els.checkoutTasaRow.classList.toggle(
+      "hidden",
+      !(moneda === "bs" || moneda === "mixto"),
+    );
+  }
+  // Inputs mixto sólo cuando moneda === mixto.
+  if (els.checkoutMixtoRow) {
+    els.checkoutMixtoRow.classList.toggle("hidden", moneda !== "mixto");
+  }
+  recargarPreviewCheckout();
 }
 
 async function recargarPreviewCheckout() {
   const habId = Number(els.checkoutHabId?.value);
   if (!habId) return;
-  const moneda =
-    els.formCheckout.querySelector('input[name="moneda_pago"]:checked')?.value ||
-    "usd";
+  const { moneda } = opcionActual();
   const tasaTipo = els.checkoutTasaTipo?.value || "bcv";
   try {
     const preview = await get(
       `/habitaciones/${habId}/checkout-preview?tasa_tipo=${tasaTipo}`,
     );
-    els.checkoutResumen.innerHTML = renderPreview(preview, moneda);
+    if (els.checkoutResumen) {
+      els.checkoutResumen.innerHTML = renderPreview(preview, moneda);
+    }
+    // Si es mixto, sugerimos por defecto el faltante en Bs.
+    if (moneda === "mixto" && els.checkoutMixtoUsd && els.checkoutMixtoBs) {
+      const recibidoUsd = Number(els.checkoutMixtoUsd.value || 0);
+      const faltanteUsd = Math.max(
+        0,
+        Number(preview.total_usd || 0) - recibidoUsd,
+      );
+      els.checkoutMixtoBs.value = (
+        faltanteUsd * Number(preview.tasa_aplicada || 0)
+      ).toFixed(2);
+    }
   } catch (error) {
-    els.checkoutResumen.innerHTML = `<p class="text-sm text-red-600">${error.message}</p>`;
+    if (els.checkoutResumen) {
+      els.checkoutResumen.innerHTML = `<p class="text-sm text-red-600">${error.message}</p>`;
+    }
   }
-}
-
-function actualizarMonedaCheckout() {
-  const moneda =
-    els.formCheckout.querySelector('input[name="moneda_pago"]:checked')?.value ||
-    "usd";
-  if (els.checkoutTasaRow) {
-    els.checkoutTasaRow.classList.toggle("hidden", moneda !== "bs");
-  }
-  recargarPreviewCheckout();
 }
 
 function renderPreview(p, moneda = "usd") {
   const pedidos = p.pedidos?.length
     ? `<p class="text-xs text-slate-500">Pedidos asociados: ${p.pedidos.map((id) => `#${id}`).join(", ")}</p>`
     : "";
-  const totalDestacado =
-    moneda === "bs"
-      ? `<strong>Total a cobrar: ${formatBs(p.total_bs)}</strong>
-         <p class="text-xs text-slate-500">Tasa ${p.tasa_tipo?.toUpperCase()}: ${Number(p.tasa_aplicada || 0).toFixed(2)} Bs/USD · equivalente ${formatUsd(p.total_usd)}</p>`
-      : `<strong>Total a cobrar: ${formatUsd(p.total_usd)}</strong>
-         <p class="text-xs text-slate-500">Sin tasa (efectivo en dólares)</p>`;
+  let totalDestacado;
+  if (moneda === "bs") {
+    totalDestacado = `<strong>Total a cobrar: ${formatBs(p.total_bs)}</strong>
+      <p class="text-xs text-slate-500">Tasa ${p.tasa_tipo?.toUpperCase()}: ${Number(p.tasa_aplicada || 0).toFixed(2)} Bs/USD · equivalente ${formatUsd(p.total_usd)}</p>`;
+  } else if (moneda === "mixto") {
+    totalDestacado = `<strong>Total a cobrar: ${formatUsd(p.total_usd)} · ${formatBs(p.total_bs)}</strong>
+      <p class="text-xs text-slate-500">Ingrese USD recibidos; el resto se cobra en Bs (tasa ${p.tasa_tipo?.toUpperCase()}: ${Number(p.tasa_aplicada || 0).toFixed(2)})</p>`;
+  } else {
+    totalDestacado = `<strong>Total a cobrar: ${formatUsd(p.total_usd)}</strong>
+      <p class="text-xs text-slate-500">Sin tasa (efectivo en dólares)</p>`;
+  }
   return `
     <p><strong>Habitación #${p.numero}</strong>${p.huesped ? ` · ${p.huesped}` : ""}</p>
     <ul class="text-sm space-y-1 mt-2">
-      <li>Estadía (${p.noches} noche${p.noches === 1 ? "" : "s"}): ${formatUsd(p.tarifa_usd)}${moneda === "bs" ? ` · ${formatBs(p.tarifa_bs)}` : ""}</li>
-      <li>Consumos: ${formatUsd(p.consumos_usd)}${moneda === "bs" ? ` · ${formatBs(p.consumos_bs)}` : ""}</li>
+      <li>Estadía (${p.noches} noche${p.noches === 1 ? "" : "s"}): ${formatUsd(p.tarifa_usd)}${moneda !== "usd" ? ` · ${formatBs(p.tarifa_bs)}` : ""}</li>
+      <li>Consumos: ${formatUsd(p.consumos_usd)}${moneda !== "usd" ? ` · ${formatBs(p.consumos_bs)}` : ""}</li>
       <li class="border-t pt-1">${totalDestacado}</li>
     </ul>
     ${pedidos}
@@ -411,20 +477,31 @@ async function confirmarCheckout(event) {
   event.preventDefault();
   const formData = new FormData(els.formCheckout);
   const habId = Number(formData.get("habitacion_id"));
-  const moneda = formData.get("moneda_pago")?.toString() || "usd";
+  const { clave, moneda } = opcionActual();
+
   const payload = {
-    moneda_pago: moneda,
-    metodo_pago: formData.get("metodo_pago")?.toString() || "efectivo",
-    tasa_tipo: moneda === "bs" ? formData.get("tasa_tipo") || "bcv" : "bcv",
+    opcion_pago: clave,
+    tasa_tipo:
+      moneda === "bs" || moneda === "mixto"
+        ? formData.get("tasa_tipo") || "bcv"
+        : "bcv",
     cuenta_banco_id: Number(formData.get("cuenta_banco_id")) || null,
     notas: formData.get("notas")?.toString() || null,
   };
+  if (moneda === "mixto") {
+    payload.monto_recibido_usd = Number(formData.get("monto_recibido_usd") || 0);
+    payload.monto_recibido_bs = Number(formData.get("monto_recibido_bs") || 0);
+  }
   try {
     const resp = await post(`/habitaciones/${habId}/checkout`, payload);
-    const msg =
-      moneda === "usd"
-        ? `Check-out OK · Cobrado ${formatUsd(resp.total_usd)} en USD`
-        : `Check-out OK · Cobrado ${formatBs(resp.total_bs)} (tasa ${resp.tasa_tipo?.toUpperCase()})`;
+    let msg;
+    if (moneda === "usd") {
+      msg = `Check-out OK · Cobrado ${formatUsd(resp.total_usd)} en USD`;
+    } else if (moneda === "bs") {
+      msg = `Check-out OK · Cobrado ${formatBs(resp.total_bs)} (tasa ${resp.tasa_tipo?.toUpperCase()})`;
+    } else {
+      msg = `Check-out OK · Mixto: ${formatUsd(resp.total_usd)} + ${formatBs(resp.total_bs)}`;
+    }
     showToast(msg, "success");
     cerrarCheckout();
     await loadHabitaciones();

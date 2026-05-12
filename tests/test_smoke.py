@@ -298,19 +298,25 @@ def test_checkin_checkout(client):
         h for h in habs if h["estado"] == "disponible" and h["numero"] == "102"
     )
 
-    # Check-in.
+    # Check-in con datos opcionales del vehículo.
     resp = client.post(
         f"/api/habitaciones/{libre['id']}/checkin",
         json={
             "huesped": "Pedro Pérez",
             "documento": "V-12345678",
             "noches": 2,
+            "vehiculo_modelo": "Toyota Corolla",
+            "vehiculo_color": "Blanco",
+            "vehiculo_placa": "AB123CD",
         },
     )
     assert resp.status_code == 200, resp.text
     reserva = resp.json()
     assert reserva["estado"] == "activa"
     assert reserva["noches"] == 2
+    assert reserva["vehiculo_modelo"] == "Toyota Corolla"
+    assert reserva["vehiculo_color"] == "Blanco"
+    assert reserva["vehiculo_placa"] == "AB123CD"
 
     # Habitación debe estar ocupada.
     detalle = client.get(f"/api/habitaciones/{libre['id']}").json()
@@ -533,6 +539,88 @@ def test_ventas_por_area(client):
     assert float(areas["bar"]["ventas_usd"]) >= 12.0
     assert float(areas["cocina"]["ventas_usd"]) >= 6.0
     assert float(data["total_usd"]) >= 18.0
+
+
+def test_checkout_opcion_pago_unificada(client, anon_client):
+    """El frontend envía ``opcion_pago``; backend mapea a moneda+método."""
+    habs = client.get("/api/habitaciones/").json()
+    # Opción "transferencia_bs" sobre la 107.
+    hab_tx = next(h for h in habs if h["estado"] == "disponible" and h["numero"] == "107")
+    client.post(
+        f"/api/habitaciones/{hab_tx['id']}/checkin",
+        json={"huesped": "Cliente Transf.", "noches": 1},
+    )
+    resp = client.post(
+        f"/api/habitaciones/{hab_tx['id']}/checkout",
+        json={"opcion_pago": "transferencia_bs", "tasa_tipo": "bcv"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["tasa_tipo"] == "bcv"
+    assert float(body["total_bs"]) > 0
+    # Reserva queda con estado cerrada y método transferencia.
+    # (Lo verificamos indirectamente por habitacion en limpieza.)
+    assert (
+        client.get(f"/api/habitaciones/{hab_tx['id']}").json()["estado"] == "limpieza"
+    )
+
+    # Opción "mixto" sobre la 108: paga $10 USD y el resto en Bs.
+    hab_mix = next(h for h in habs if h["estado"] == "disponible" and h["numero"] == "108")
+    client.post(
+        f"/api/habitaciones/{hab_mix['id']}/checkin",
+        json={"huesped": "Cliente Mixto", "noches": 2},
+    )
+    resp_mix = client.post(
+        f"/api/habitaciones/{hab_mix['id']}/checkout",
+        json={
+            "opcion_pago": "mixto",
+            "tasa_tipo": "paralelo",
+            "monto_recibido_usd": 10,
+        },
+    )
+    assert resp_mix.status_code == 200, resp_mix.text
+    body_mix = resp_mix.json()
+    # Total estadía = 2 * 20 = 40 USD. Recibió 10 USD → faltan 30 USD * paralelo.
+    esperado_bs = round(30.00 * float(body_mix["tasa_aplicada"]), 2)
+    assert float(body_mix["total_usd"]) == 10.00
+    assert float(body_mix["total_bs"]) == esperado_bs
+
+
+def test_ultimas_transacciones(client):
+    # Generamos un pedido pagado para que aparezca en el historial.
+    productos = client.get("/api/productos/").json()
+    agua = next(p for p in productos if p["nombre"] == "Agua Mineral")
+    pedido = client.post(
+        "/api/pedidos/",
+        json={"tipo": "bar", "mesa": "Test TX",
+              "items": [{"producto_id": agua["id"], "cantidad": 1}]},
+    ).json()
+    client.post(
+        f"/api/pedidos/{pedido['id']}/pagar",
+        json={"metodo_pago": "usd", "monto_usd": 5},
+    )
+
+    resp = client.get("/api/reportes/ultimas-transacciones?limite=10")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert isinstance(body, list)
+    assert len(body) > 0
+    fila = body[0]
+    for key in ("id", "fecha", "concepto", "monto_usd", "monto_bs", "tipo", "usuario_nombre"):
+        assert key in fila, f"Falta campo {key} en respuesta"
+
+
+def test_ultimas_transacciones_mesero_accede(anon_client):
+    """El mesero también consume el endpoint (lo usa el dashboard si tuviera acceso)."""
+    token = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = anon_client.get(
+        "/api/reportes/ultimas-transacciones?limite=5", headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    # En cambio, no puede ver resumen-dia.
+    res = anon_client.get("/api/reportes/resumen-dia", headers=headers)
+    assert res.status_code == 403
 
 
 def test_habitaciones_precio_actualizado(client):

@@ -295,6 +295,33 @@ def _migrar_pedidos_habitacion(engine) -> None:
             )
 
 
+def _migrar_reservas_vehiculo(engine) -> None:
+    """Añade columnas opcionales del vehículo del huésped a ``reservas``."""
+    if not _is_sqlite(engine):
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existe = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='reservas'")
+        ).first()
+        if not existe:
+            return
+        info = conn.execute(text("PRAGMA table_info(reservas)")).fetchall()
+        columnas = {row[1] for row in info}
+        nuevos = (
+            ("vehiculo_modelo", "VARCHAR(100)"),
+            ("vehiculo_color", "VARCHAR(50)"),
+            ("vehiculo_placa", "VARCHAR(20)"),
+        )
+        for nombre, tipo in nuevos:
+            if nombre not in columnas:
+                print(f"[check_db] Migrando reservas: añadiendo columna '{nombre}'…")
+                conn.execute(
+                    text(f"ALTER TABLE reservas ADD COLUMN {nombre} {tipo}")
+                )
+
+
 def _seed_productos_piscina(engine) -> None:
     """Inserta los productos 'Entrada Piscina' si no existen (idempotente)."""
     from sqlalchemy import text
@@ -397,6 +424,7 @@ def main() -> None:
     _actualizar_precio_habitaciones(engine)
     _migrar_estados_habitaciones(engine)
     _migrar_pedidos_habitacion(engine)
+    _migrar_reservas_vehiculo(engine)
     _seed_productos_piscina(engine)
 
     print("[check_db] Ejecutando create_all…")

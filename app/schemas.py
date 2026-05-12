@@ -87,6 +87,9 @@ class ReservaCreate(BaseModel):
     noches: int = Field(default=1, ge=1)
     tarifa_bs: Decimal = Field(default=Decimal("0"), ge=0)
     tarifa_usd: Decimal = Field(default=Decimal("0"), ge=0)
+    vehiculo_modelo: Optional[str] = Field(default=None, max_length=100)
+    vehiculo_color: Optional[str] = Field(default=None, max_length=50)
+    vehiculo_placa: Optional[str] = Field(default=None, max_length=20)
 
 
 class ReservaCheckout(BaseModel):
@@ -109,17 +112,32 @@ class HabitacionCheckinRequest(BaseModel):
     tarifa_usd: Optional[Decimal] = Field(default=None, ge=0)
     tarifa_bs: Optional[Decimal] = Field(default=None, ge=0)
     notas: Optional[str] = None
+    vehiculo_modelo: Optional[str] = Field(default=None, max_length=100)
+    vehiculo_color: Optional[str] = Field(default=None, max_length=50)
+    vehiculo_placa: Optional[str] = Field(default=None, max_length=20)
 
 
 class HabitacionCheckoutRequest(BaseModel):
-    """Check-out + cobro de la habitación (estadía + consumos)."""
+    """Check-out + cobro de la habitación (estadía + consumos).
 
-    moneda_pago: str = Field(default="usd", min_length=2, max_length=10)
-    """``usd`` (efectivo en dólares, sin aplicar tasa) o ``bs`` (efectivo en bolívares)."""
+    El frontend envía ``opcion_pago`` (botones combinados) y el backend lo mapea
+    a ``moneda_pago`` + ``metodo_pago``. Para compatibilidad con clientes antiguos
+    también se aceptan ``moneda_pago`` / ``metodo_pago`` por separado.
+    """
+
+    opcion_pago: Optional[str] = Field(default=None, max_length=30)
+    """Opción combinada: ``efectivo_usd``, ``efectivo_bs``, ``transferencia_bs``,
+    ``pagomovil_bs``, ``mixto``."""
+
+    moneda_pago: Optional[str] = Field(default=None, min_length=2, max_length=10)
+    """``usd``, ``bs`` o ``mixto`` (se infiere de ``opcion_pago`` si no se envía)."""
+
     metodo_pago: Optional[str] = Field(default=None, max_length=20)
     """Método específico de pago (efectivo, transferencia, pagomovil, mixto...)."""
+
     tasa_tipo: Optional[str] = Field(default=None, max_length=20)
-    """Si ``moneda_pago='bs'``, qué tasa aplicar para convertir USD→Bs (``bcv`` o ``paralelo``)."""
+    """Si ``moneda_pago='bs'`` o ``'mixto'``, qué tasa aplicar (``bcv`` o ``paralelo``)."""
+
     cuenta_banco_id: Optional[int] = Field(default=None, gt=0)
     monto_recibido_bs: Decimal = Field(default=Decimal("0"), ge=0)
     monto_recibido_usd: Decimal = Field(default=Decimal("0"), ge=0)
@@ -162,6 +180,9 @@ class ReservaOut(ORMModel):
     total_final_bs: Decimal
     total_final_usd: Decimal
     estado: str
+    vehiculo_modelo: Optional[str] = None
+    vehiculo_color: Optional[str] = None
+    vehiculo_placa: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -468,6 +489,18 @@ class ResumenDia(BaseModel):
     ocupacion_porcentaje: float
     productos_bajo_stock: int
     tasa_dia: Decimal
+
+
+class TransaccionResumen(BaseModel):
+    """Fila unificada para el historial de transacciones del dashboard."""
+
+    id: int
+    fecha: datetime
+    concepto: str
+    monto_usd: Decimal
+    monto_bs: Decimal
+    tipo: str
+    usuario_nombre: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

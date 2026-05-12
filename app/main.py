@@ -82,7 +82,7 @@ app.include_router(inventario.router, prefix="/api", dependencies=_ADMIN)
 app.include_router(gastos.router, prefix="/api", dependencies=_ADMIN)
 app.include_router(personal.router, prefix="/api", dependencies=_ADMIN)
 app.include_router(cuentas.router, prefix="/api", dependencies=_ADMIN)
-app.include_router(reportes.router, prefix="/api", dependencies=_RECEPCION)
+app.include_router(reportes.router, prefix="/api", dependencies=_AUTH)
 
 
 # ---------------------------------------------------------------------------

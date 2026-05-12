@@ -189,6 +189,9 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
             tarifa_bs=tarifa_bs,
             tarifa_usd=tarifa_usd,
             estado="activa",
+            vehiculo_modelo=(data.vehiculo_modelo or None),
+            vehiculo_color=(data.vehiculo_color or None),
+            vehiculo_placa=(data.vehiculo_placa or None),
         )
         db.add(reserva)
 
@@ -208,7 +211,45 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
 # Check-out: total estad?a + consumos
 # ---------------------------------------------------------------------------
 TIPOS_TASA_VALIDOS = {"bcv", "paralelo"}
-MONEDAS_PAGO_VALIDAS = {"usd", "bs"}
+MONEDAS_PAGO_VALIDAS = {"usd", "bs", "mixto"}
+
+# Mapeo opci?n combinada ? (moneda_pago, metodo_pago)
+OPCION_PAGO_MAP: dict[str, tuple[str, str]] = {
+    "efectivo_usd": ("usd", "efectivo"),
+    "efectivo_bs": ("bs", "efectivo"),
+    "transferencia_bs": ("bs", "transferencia"),
+    "pagomovil_bs": ("bs", "pagomovil"),
+    "mixto": ("mixto", "mixto"),
+}
+
+
+def _resolver_opcion_pago(
+    opcion_pago: Optional[str],
+    moneda_pago: Optional[str],
+    metodo_pago: Optional[str],
+) -> tuple[str, str]:
+    """Devuelve la tupla (moneda_pago, metodo_pago) final.
+
+    Si llega ``opcion_pago``, manda; si no, se infiere a partir de los campos
+    sueltos (compatibilidad con clientes antiguos).
+    """
+    if opcion_pago:
+        clave = opcion_pago.lower().strip()
+        if clave in OPCION_PAGO_MAP:
+            return OPCION_PAGO_MAP[clave]
+        raise HTTPException(
+            status_code=400,
+            detail=f"opcion_pago inv?lida. Use: {sorted(OPCION_PAGO_MAP)}",
+        )
+
+    moneda = (moneda_pago or "usd").lower().strip()
+    if moneda not in MONEDAS_PAGO_VALIDAS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"moneda_pago inv?lida. Use: {sorted(MONEDAS_PAGO_VALIDAS)}",
+        )
+    metodo = (metodo_pago or "efectivo").lower().strip()
+    return moneda, metodo
 
 
 def _calcular_preview(
@@ -332,12 +373,9 @@ def checkout(
     data: HabitacionCheckoutRequest,
     db: Session = Depends(get_db),
 ):
-    moneda_pago = (data.moneda_pago or "usd").lower().strip()
-    if moneda_pago not in MONEDAS_PAGO_VALIDAS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"moneda_pago inv?lida. Use: {sorted(MONEDAS_PAGO_VALIDAS)}",
-        )
+    moneda_pago, metodo_pago = _resolver_opcion_pago(
+        data.opcion_pago, data.moneda_pago, data.metodo_pago
+    )
     tasa_tipo = (data.tasa_tipo or "bcv").lower().strip()
     if tasa_tipo not in TIPOS_TASA_VALIDOS:
         raise HTTPException(
@@ -364,17 +402,29 @@ def checkout(
     try:
         preview = _calcular_preview(db, habitacion, tasa_tipo=tasa_tipo)
 
-        # M?todo de pago efectivo:
-        #   - Si paga en USD, no se aplica tasa (efectivo d?lares).
-        #   - Si paga en Bs, se convierte usando la tasa elegida (BCV o paralelo).
-        metodo_pago = (data.metodo_pago or moneda_pago).lower().strip()
-
+        # Reparto del cobro entre USD y Bs seg?n la moneda elegida:
+        #   - usd  ? todo en d?lares (sin tasa).
+        #   - bs   ? todo en bol?vares (con tasa BCV o paralelo).
+        #   - mixto ? respeta lo que el usuario haya ingresado en
+        #             monto_recibido_usd / monto_recibido_bs; lo no cubierto en
+        #             USD se completa con Bs a la tasa aplicada.
         if moneda_pago == "usd":
             pagado_usd_total = preview.total_usd
             pagado_bs_total = Decimal("0")
-        else:
+        elif moneda_pago == "bs":
             pagado_usd_total = Decimal("0")
             pagado_bs_total = preview.total_bs
+        else:  # mixto
+            pagado_usd_total = Decimal(data.monto_recibido_usd or 0).quantize(Decimal("0.01"))
+            # Lo que falta en USD se cobra en Bs a la tasa aplicada.
+            faltante_usd = (preview.total_usd - pagado_usd_total).quantize(Decimal("0.01"))
+            if faltante_usd < 0:
+                faltante_usd = Decimal("0")
+            pagado_bs_total = (faltante_usd * preview.tasa_aplicada).quantize(Decimal("0.01"))
+            # Si el cliente indic? expl?citamente bol?vares recibidos,
+            # respetamos ese valor (debe coincidir con el faltante).
+            if data.monto_recibido_bs and Decimal(data.monto_recibido_bs) > 0:
+                pagado_bs_total = Decimal(data.monto_recibido_bs).quantize(Decimal("0.01"))
 
         ahora = caracas_now()
         for pedido in pedidos_abiertos:
@@ -384,9 +434,18 @@ def checkout(
             if moneda_pago == "usd":
                 pedido.pagado_usd = Decimal(pedido.total_usd or 0)
                 pedido.pagado_bs = Decimal("0")
-            else:
+            elif moneda_pago == "bs":
                 pedido.pagado_bs = Decimal(pedido.total_bs or 0)
                 pedido.pagado_usd = Decimal("0")
+            else:  # mixto: prorrateamos en proporci?n al total recibido
+                total_pedido_usd = Decimal(pedido.total_usd or 0)
+                if preview.total_usd > 0:
+                    proporcion = total_pedido_usd / preview.total_usd
+                    pedido.pagado_usd = (pagado_usd_total * proporcion).quantize(Decimal("0.01"))
+                    pedido.pagado_bs = (pagado_bs_total * proporcion).quantize(Decimal("0.01"))
+                else:
+                    pedido.pagado_usd = Decimal("0")
+                    pedido.pagado_bs = Decimal("0")
             pedido.updated_at = ahora
 
         if reserva:
@@ -394,18 +453,19 @@ def checkout(
             reserva.estado = "cerrada"
             reserva.total_consumos_bs = preview.consumos_bs
             reserva.total_consumos_usd = preview.consumos_usd
-            reserva.total_final_bs = preview.total_bs
-            reserva.total_final_usd = preview.total_usd
+            reserva.total_final_bs = pagado_bs_total
+            reserva.total_final_usd = pagado_usd_total
             reserva.updated_at = ahora
 
         habitacion.estado = "limpieza"
         habitacion.updated_at = ahora
 
         db.commit()
-        # Devolvemos preview enriquecido con los totales pagados reales.
         preview_resp = preview.model_copy(
             update={
                 "tasa_tipo": tasa_tipo,
+                "total_usd": pagado_usd_total if moneda_pago != "bs" else preview.total_usd,
+                "total_bs": pagado_bs_total if moneda_pago != "usd" else preview.total_bs,
             }
         )
         return preview_resp

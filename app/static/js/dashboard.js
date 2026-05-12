@@ -19,7 +19,20 @@ const els = {
   areaCocinaBs: document.getElementById("dash-area-cocina-bs"),
   areaTotalUsd: document.getElementById("dash-area-total-usd"),
   areaTotalBs: document.getElementById("dash-area-total-bs"),
+  tablaTx: document.getElementById("dash-tabla-transacciones"),
+  txActualizado: document.getElementById("dash-tx-actualizado"),
 };
+
+const TX_BADGES = {
+  checkout: { etiqueta: "Check-out", clase: "badge-info" },
+  habitacion: { etiqueta: "Consumo hab.", clase: "badge-warning" },
+  piscina: { etiqueta: "Piscina", clase: "badge-success" },
+  bar: { etiqueta: "Bar", clase: "badge-info" },
+  restaurante: { etiqueta: "Cocina", clase: "badge-success" },
+  cocina: { etiqueta: "Cocina", clase: "badge-success" },
+};
+
+let txTimer = null;
 
 export async function loadDashboard() {
   try {
@@ -41,9 +54,67 @@ export async function loadDashboard() {
 
     renderVentasArea(ventasArea);
     await loadBajoStockTabla();
+    await loadUltimasTransacciones();
+    iniciarPollingTransacciones();
   } catch (error) {
     showToast(`Error cargando dashboard: ${error.message}`, "error");
   }
+}
+
+function iniciarPollingTransacciones() {
+  if (txTimer) return;
+  txTimer = setInterval(() => {
+    loadUltimasTransacciones().catch(() => {});
+  }, 30_000);
+}
+
+async function loadUltimasTransacciones() {
+  if (!els.tablaTx) return;
+  try {
+    const filas = await get("/reportes/ultimas-transacciones?limite=20");
+    if (!filas.length) {
+      els.tablaTx.innerHTML = `<tr><td colspan="6"><div class="empty-state">Sin transacciones registradas todavía.</div></td></tr>`;
+    } else {
+      els.tablaTx.innerHTML = filas.map(renderTxFila).join("");
+    }
+    if (els.txActualizado) {
+      const ahora = new Date().toLocaleTimeString("es-VE", {
+        timeZone: "America/Caracas",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      els.txActualizado.textContent = `Actualizado ${ahora}`;
+    }
+  } catch (error) {
+    els.tablaTx.innerHTML = `<tr><td colspan="6"><div class="empty-state">${error.message}</div></td></tr>`;
+  }
+}
+
+function renderTxFila(tx) {
+  const fecha = tx.fecha
+    ? new Date(tx.fecha).toLocaleString("es-VE", {
+        timeZone: "America/Caracas",
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
+  const badge = TX_BADGES[tx.tipo] || {
+    etiqueta: tx.tipo || "venta",
+    clase: "badge-info",
+  };
+  return `
+    <tr>
+      <td class="text-xs whitespace-nowrap">${fecha}</td>
+      <td><span class="badge ${badge.clase}">${badge.etiqueta}</span></td>
+      <td>${tx.concepto || "-"}</td>
+      <td class="text-right">${formatUsd(tx.monto_usd)}</td>
+      <td class="text-right">${formatBs(tx.monto_bs)}</td>
+      <td class="text-xs text-slate-500">${tx.usuario_nombre || "-"}</td>
+    </tr>
+  `;
 }
 
 function renderVentasArea(data) {

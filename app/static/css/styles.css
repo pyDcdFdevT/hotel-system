@@ -129,6 +129,18 @@ body {
 .btn-cancelar { background-color: #ffffff; color: #dc2626; border-color: #dc2626; }
 .btn-checkin-resv { background-color: #16a34a; color: #ffffff; }
 
+.checkout-opcion {
+  border-color: var(--color-border);
+  background-color: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.checkout-opcion:hover { border-color: #94a3b8; }
+.checkout-opcion.activa {
+  border-color: var(--color-primary);
+  background-color: #eef2ff;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
