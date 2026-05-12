@@ -519,6 +519,55 @@ class TransaccionResumen(BaseModel):
     usuario_nombre: Optional[str] = None
 
 
+class HistorialResumen(BaseModel):
+    """Totales financieros agregados del período."""
+
+    desde: date
+    hasta: date
+    total_ventas_usd: Decimal = Decimal("0")
+    total_ventas_bs: Decimal = Decimal("0")
+    total_gastos_usd: Decimal = Decimal("0")
+    total_gastos_bs: Decimal = Decimal("0")
+    ganancia_neta_usd: Decimal = Decimal("0")
+    ganancia_neta_bs: Decimal = Decimal("0")
+
+
+class MontoMoneda(BaseModel):
+    """Tupla USD/Bs para un agrupador."""
+
+    usd: Decimal = Decimal("0")
+    bs: Decimal = Decimal("0")
+
+
+class HistorialVentasPorArea(BaseModel):
+    desde: date
+    hasta: date
+    habitaciones: MontoMoneda = MontoMoneda()
+    bar: MontoMoneda = MontoMoneda()
+    cocina: MontoMoneda = MontoMoneda()
+    piscina: MontoMoneda = MontoMoneda()
+
+
+class HistorialPorMetodo(BaseModel):
+    desde: date
+    hasta: date
+    efectivo_usd: MontoMoneda = MontoMoneda()
+    efectivo_bs: MontoMoneda = MontoMoneda()
+    transferencia_bs: MontoMoneda = MontoMoneda()
+    pagomovil_bs: MontoMoneda = MontoMoneda()
+    mixto: MontoMoneda = MontoMoneda()
+    otros: MontoMoneda = MontoMoneda()
+
+
+class HistorialTransacciones(BaseModel):
+    desde: date
+    hasta: date
+    total: int
+    limite: int
+    offset: int
+    items: List[TransaccionResumen]
+
+
 # ---------------------------------------------------------------------------
 # Auth / Usuarios
 # ---------------------------------------------------------------------------

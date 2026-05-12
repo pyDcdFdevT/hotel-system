@@ -21,7 +21,17 @@ from app.models import (
     today,
 )
 from app.routers.auth import require_roles
-from app.schemas import ResumenDia, TransaccionResumen, VentasArea, VentasPorArea
+from app.schemas import (
+    HistorialPorMetodo,
+    HistorialResumen,
+    HistorialTransacciones,
+    HistorialVentasPorArea,
+    MontoMoneda,
+    ResumenDia,
+    TransaccionResumen,
+    VentasArea,
+    VentasPorArea,
+)
 from app.services.tasa_service import obtener_tasa_dia
 
 
@@ -32,6 +42,7 @@ router = APIRouter(prefix="/reportes", tags=["reportes"])
 # mesero también pueda llegar al endpoint de transacciones recientes).
 _REPORTES_GERENCIA = Depends(require_roles("admin", "recepcion"))
 _REPORTES_OPERATIVO = Depends(require_roles("admin", "recepcion", "mesero"))
+_REPORTES_ADMIN = Depends(require_roles("admin"))
 
 
 @router.get(
@@ -283,4 +294,356 @@ def ultimas_transacciones(
         raise HTTPException(
             status_code=500,
             detail=f"Error generando transacciones recientes: {exc}",
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Historial (admin) — agregados por período arbitrario
+# ---------------------------------------------------------------------------
+def _rango_validado(
+    desde: Optional[date_type], hasta: Optional[date_type]
+) -> tuple[date_type, date_type]:
+    hoy = today()
+    inicio = desde or hoy
+    fin = hasta or hoy
+    if fin < inicio:
+        raise HTTPException(
+            status_code=400,
+            detail="El parámetro 'hasta' debe ser ≥ 'desde'.",
+        )
+    return inicio, fin
+
+
+def _clasificar_metodo(
+    metodo: Optional[str],
+    pagado_usd: Decimal,
+    pagado_bs: Decimal,
+) -> str:
+    """Asigna una etiqueta combinada según el método y la moneda efectivamente cobrada.
+
+    Mantiene las claves usadas por el frontend (``efectivo_usd``, ``efectivo_bs``,
+    ``transferencia_bs``, ``pagomovil_bs``, ``mixto``, ``otros``).
+    """
+    m = (metodo or "").lower().strip()
+    if m == "transferencia":
+        return "transferencia_bs"
+    if m == "pagomovil":
+        return "pagomovil_bs"
+    if m == "mixto":
+        return "mixto"
+    if pagado_usd > 0 and pagado_bs > 0:
+        return "mixto"
+    if pagado_usd > 0:
+        return "efectivo_usd"
+    if pagado_bs > 0:
+        return "efectivo_bs"
+    return "otros"
+
+
+def _pedidos_pagados_en_rango(
+    db: Session, desde: date_type, hasta: date_type
+) -> list[Pedido]:
+    return (
+        db.query(Pedido)
+        .options(joinedload(Pedido.detalles).joinedload(DetallePedido.producto))
+        .filter(Pedido.estado.in_(["pagado", "cargado"]))
+        .filter(func.date(Pedido.updated_at) >= desde)
+        .filter(func.date(Pedido.updated_at) <= hasta)
+        .order_by(Pedido.updated_at.desc(), Pedido.id.desc())
+        .all()
+    )
+
+
+def _reservas_cerradas_en_rango(
+    db: Session, desde: date_type, hasta: date_type
+) -> list[Reserva]:
+    return (
+        db.query(Reserva)
+        .filter(Reserva.estado == "cerrada")
+        .filter(Reserva.fecha_checkout_real >= desde)
+        .filter(Reserva.fecha_checkout_real <= hasta)
+        .order_by(Reserva.updated_at.desc(), Reserva.id.desc())
+        .all()
+    )
+
+
+def _room_income_bs(reserva: Reserva) -> Decimal:
+    """Ingreso de la habitación en bolívares = total_final_bs − consumos_bs.
+
+    Sólo aporta cuando la reserva se cobró en Bs (o mixto). Para cobros 100% USD
+    el ``total_final_bs`` queda en 0 y este monto es 0.
+    """
+    total_bs = Decimal(reserva.total_final_bs or 0)
+    consumos_bs = Decimal(reserva.total_consumos_bs or 0)
+    return max(Decimal("0"), (total_bs - consumos_bs).quantize(Decimal("0.01")))
+
+
+@router.get(
+    "/historial/resumen",
+    response_model=HistorialResumen,
+    dependencies=[_REPORTES_ADMIN],
+)
+def historial_resumen(
+    desde: Optional[date_type] = Query(default=None),
+    hasta: Optional[date_type] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    inicio, fin = _rango_validado(desde, hasta)
+    try:
+        pedidos = _pedidos_pagados_en_rango(db, inicio, fin)
+        ventas_usd = sum(
+            (Decimal(p.pagado_usd or 0) for p in pedidos), Decimal("0")
+        )
+        ventas_bs = sum(
+            (Decimal(p.pagado_bs or 0) for p in pedidos), Decimal("0")
+        )
+
+        reservas = _reservas_cerradas_en_rango(db, inicio, fin)
+        for r in reservas:
+            room_usd = Decimal(r.tarifa_usd or 0) + Decimal(r.recarga_extra_usd or 0)
+            # Sólo contamos USD si efectivamente se cobró algo en USD.
+            if Decimal(r.total_final_usd or 0) > 0:
+                ventas_usd += room_usd
+            ventas_bs += _room_income_bs(r)
+
+        gastos = (
+            db.query(
+                func.coalesce(func.sum(Gasto.monto_usd), 0),
+                func.coalesce(func.sum(Gasto.monto_bs), 0),
+            )
+            .filter(Gasto.fecha >= inicio)
+            .filter(Gasto.fecha <= fin)
+            .one()
+        )
+        gastos_usd = Decimal(gastos[0] or 0)
+        gastos_bs = Decimal(gastos[1] or 0)
+
+        return HistorialResumen(
+            desde=inicio,
+            hasta=fin,
+            total_ventas_usd=ventas_usd.quantize(Decimal("0.01")),
+            total_ventas_bs=ventas_bs.quantize(Decimal("0.01")),
+            total_gastos_usd=gastos_usd.quantize(Decimal("0.01")),
+            total_gastos_bs=gastos_bs.quantize(Decimal("0.01")),
+            ganancia_neta_usd=(ventas_usd - gastos_usd).quantize(Decimal("0.01")),
+            ganancia_neta_bs=(ventas_bs - gastos_bs).quantize(Decimal("0.01")),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Error generando resumen histórico: {exc}"
+        ) from exc
+
+
+@router.get(
+    "/historial/ventas-por-area",
+    response_model=HistorialVentasPorArea,
+    dependencies=[_REPORTES_ADMIN],
+)
+def historial_ventas_por_area(
+    desde: Optional[date_type] = Query(default=None),
+    hasta: Optional[date_type] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    inicio, fin = _rango_validado(desde, hasta)
+    try:
+        pedidos = _pedidos_pagados_en_rango(db, inicio, fin)
+        bar = MontoMoneda()
+        cocina = MontoMoneda()
+        piscina = MontoMoneda()
+
+        for p in pedidos:
+            total_usd = Decimal(p.total_usd or 0)
+            total_bs = Decimal(p.total_bs or 0)
+            if total_usd <= 0 and total_bs <= 0:
+                continue
+            # Repartimos el total del pedido entre las áreas según el peso
+            # USD de cada detalle.
+            base = sum(
+                (Decimal(d.subtotal_usd or 0) for d in (p.detalles or [])),
+                Decimal("0"),
+            )
+            for det in p.detalles or []:
+                sub_usd = Decimal(det.subtotal_usd or 0)
+                sub_bs = Decimal(det.subtotal_bs or 0)
+                if base > 0:
+                    peso = sub_usd / base
+                    # Para reflejar el cobro real, prorrateamos pagado_usd/bs.
+                    aporte_usd = (Decimal(p.pagado_usd or 0) * peso).quantize(
+                        Decimal("0.01")
+                    )
+                    aporte_bs = (Decimal(p.pagado_bs or 0) * peso).quantize(
+                        Decimal("0.01")
+                    )
+                else:
+                    aporte_usd = sub_usd
+                    aporte_bs = sub_bs
+                producto = getattr(det, "producto", None)
+                categoria = (producto.categoria if producto else "") or ""
+                area = (producto.area if producto else "general") or "general"
+                if categoria.strip().lower() == "piscina":
+                    piscina.usd += aporte_usd
+                    piscina.bs += aporte_bs
+                elif area.lower() == "bar":
+                    bar.usd += aporte_usd
+                    bar.bs += aporte_bs
+                else:
+                    # cocina / general → contabilizado como cocina.
+                    cocina.usd += aporte_usd
+                    cocina.bs += aporte_bs
+
+        habitaciones = MontoMoneda()
+        for r in _reservas_cerradas_en_rango(db, inicio, fin):
+            if Decimal(r.total_final_usd or 0) > 0:
+                habitaciones.usd += Decimal(r.tarifa_usd or 0) + Decimal(
+                    r.recarga_extra_usd or 0
+                )
+            habitaciones.bs += _room_income_bs(r)
+
+        for m in (habitaciones, bar, cocina, piscina):
+            m.usd = m.usd.quantize(Decimal("0.01"))
+            m.bs = m.bs.quantize(Decimal("0.01"))
+
+        return HistorialVentasPorArea(
+            desde=inicio,
+            hasta=fin,
+            habitaciones=habitaciones,
+            bar=bar,
+            cocina=cocina,
+            piscina=piscina,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando ventas por área (histórico): {exc}",
+        ) from exc
+
+
+@router.get(
+    "/historial/por-metodo-pago",
+    response_model=HistorialPorMetodo,
+    dependencies=[_REPORTES_ADMIN],
+)
+def historial_por_metodo_pago(
+    desde: Optional[date_type] = Query(default=None),
+    hasta: Optional[date_type] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    inicio, fin = _rango_validado(desde, hasta)
+    try:
+        buckets: dict[str, MontoMoneda] = {
+            "efectivo_usd": MontoMoneda(),
+            "efectivo_bs": MontoMoneda(),
+            "transferencia_bs": MontoMoneda(),
+            "pagomovil_bs": MontoMoneda(),
+            "mixto": MontoMoneda(),
+            "otros": MontoMoneda(),
+        }
+
+        for p in _pedidos_pagados_en_rango(db, inicio, fin):
+            etiqueta = _clasificar_metodo(
+                p.metodo_pago,
+                Decimal(p.pagado_usd or 0),
+                Decimal(p.pagado_bs or 0),
+            )
+            buckets[etiqueta].usd += Decimal(p.pagado_usd or 0)
+            buckets[etiqueta].bs += Decimal(p.pagado_bs or 0)
+
+        for r in _reservas_cerradas_en_rango(db, inicio, fin):
+            room_usd = (
+                Decimal(r.tarifa_usd or 0) + Decimal(r.recarga_extra_usd or 0)
+                if Decimal(r.total_final_usd or 0) > 0
+                else Decimal("0")
+            )
+            room_bs = _room_income_bs(r)
+            etiqueta = _clasificar_metodo(
+                r.metodo_pago,
+                Decimal(r.total_final_usd or 0),
+                Decimal(r.total_final_bs or 0),
+            )
+            buckets[etiqueta].usd += room_usd
+            buckets[etiqueta].bs += room_bs
+
+        for m in buckets.values():
+            m.usd = m.usd.quantize(Decimal("0.01"))
+            m.bs = m.bs.quantize(Decimal("0.01"))
+
+        return HistorialPorMetodo(
+            desde=inicio,
+            hasta=fin,
+            **buckets,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando desglose por método de pago: {exc}",
+        ) from exc
+
+
+@router.get(
+    "/historial/transacciones",
+    response_model=HistorialTransacciones,
+    dependencies=[_REPORTES_ADMIN],
+)
+def historial_transacciones(
+    desde: Optional[date_type] = Query(default=None),
+    hasta: Optional[date_type] = Query(default=None),
+    limite: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    inicio, fin = _rango_validado(desde, hasta)
+    try:
+        pedidos = _pedidos_pagados_en_rango(db, inicio, fin)
+        reservas = _reservas_cerradas_en_rango(db, inicio, fin)
+
+        filas: list[TransaccionResumen] = []
+        for p in pedidos:
+            fecha = p.updated_at or p.fecha or datetime_type.utcnow()
+            filas.append(
+                TransaccionResumen(
+                    id=int(p.id),
+                    fecha=fecha,
+                    concepto=_concepto_pedido(p),
+                    monto_usd=Decimal(p.pagado_usd or 0),
+                    monto_bs=Decimal(p.pagado_bs or 0),
+                    tipo=_tipo_transaccion_pedido(p),
+                    usuario_nombre="Sistema",
+                )
+            )
+        for r in reservas:
+            fecha = r.updated_at or datetime_type.utcnow()
+            filas.append(
+                TransaccionResumen(
+                    id=int(r.id),
+                    fecha=fecha,
+                    concepto=f"Check-out Hab. (reserva #{r.id}) · {r.huesped}",
+                    monto_usd=Decimal(r.total_final_usd or 0),
+                    monto_bs=Decimal(r.total_final_bs or 0),
+                    tipo="checkout",
+                    usuario_nombre="Sistema",
+                )
+            )
+
+        filas.sort(key=lambda f: f.fecha, reverse=True)
+        total = len(filas)
+        return HistorialTransacciones(
+            desde=inicio,
+            hasta=fin,
+            total=total,
+            limite=limite,
+            offset=offset,
+            items=filas[offset : offset + limite],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando historial de transacciones: {exc}",
         ) from exc

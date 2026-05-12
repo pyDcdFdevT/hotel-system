@@ -667,6 +667,90 @@ def test_ultimas_transacciones(client):
         assert key in fila, f"Falta campo {key} en respuesta"
 
 
+def test_historial_endpoints_admin(client):
+    """Los 4 endpoints /reportes/historial/* responden con la estructura esperada."""
+    # Generamos una venta para que aparezca en el período.
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+    pedido = client.post(
+        "/api/pedidos/",
+        json={"tipo": "bar", "mesa": "Hist Test",
+              "items": [{"producto_id": cerveza["id"], "cantidad": 2}]},
+    ).json()
+    client.post(
+        f"/api/pedidos/{pedido['id']}/pagar",
+        json={"metodo_pago": "pagomovil", "tasa_tipo": "bcv", "monto_bs": 100000},
+    )
+
+    # /historial/resumen
+    res = client.get("/api/reportes/historial/resumen")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    for key in (
+        "desde",
+        "hasta",
+        "total_ventas_usd",
+        "total_ventas_bs",
+        "total_gastos_usd",
+        "total_gastos_bs",
+        "ganancia_neta_usd",
+        "ganancia_neta_bs",
+    ):
+        assert key in body
+
+    # /historial/ventas-por-area
+    areas = client.get("/api/reportes/historial/ventas-por-area").json()
+    for area in ("habitaciones", "bar", "cocina", "piscina"):
+        assert area in areas
+        assert "usd" in areas[area]
+        assert "bs" in areas[area]
+
+    # /historial/por-metodo-pago
+    metodos = client.get("/api/reportes/historial/por-metodo-pago").json()
+    for clave in (
+        "efectivo_usd",
+        "efectivo_bs",
+        "transferencia_bs",
+        "pagomovil_bs",
+        "mixto",
+        "otros",
+    ):
+        assert clave in metodos
+    # Como pagamos por pagomovil, la suma de bs debe ser > 0.
+    assert float(metodos["pagomovil_bs"]["bs"]) > 0
+
+    # /historial/transacciones con paginación.
+    tx = client.get(
+        "/api/reportes/historial/transacciones?limite=5&offset=0"
+    ).json()
+    assert "items" in tx
+    assert tx["limite"] == 5
+    assert tx["offset"] == 0
+    assert isinstance(tx["items"], list)
+    assert tx["total"] >= 1
+
+
+def test_historial_admin_only(anon_client):
+    """Sólo admin debe poder leer el historial."""
+    mesero_token = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()["token"]
+    headers = {"Authorization": f"Bearer {mesero_token}"}
+    for ruta in (
+        "/api/reportes/historial/resumen",
+        "/api/reportes/historial/ventas-por-area",
+        "/api/reportes/historial/por-metodo-pago",
+        "/api/reportes/historial/transacciones",
+    ):
+        resp = anon_client.get(ruta, headers=headers)
+        assert resp.status_code == 403, f"Mesero no debería ver {ruta}: {resp.text}"
+
+
+def test_historial_rango_invalido(client):
+    resp = client.get(
+        "/api/reportes/historial/resumen?desde=2026-12-31&hasta=2026-01-01"
+    )
+    assert resp.status_code == 400
+
+
 def test_ultimas_transacciones_mesero_accede(anon_client):
     """El mesero también consume el endpoint (lo usa el dashboard si tuviera acceso)."""
     token = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()["token"]

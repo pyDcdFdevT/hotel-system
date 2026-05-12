@@ -520,6 +520,7 @@ def checkout(
             reserva.horas_extra = int(preview.horas_extra or 0)
             reserva.recarga_extra_usd = preview.recarga_extra_usd
             reserva.recarga_extra_bs = preview.recarga_extra_bs
+            reserva.metodo_pago = metodo_pago
             reserva.updated_at = ahora
 
         habitacion.estado = "limpieza"

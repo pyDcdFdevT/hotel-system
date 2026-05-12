@@ -318,6 +318,7 @@ def _migrar_reservas_vehiculo(engine) -> None:
             ("horas_extra", "INTEGER NOT NULL DEFAULT 0"),
             ("recarga_extra_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
             ("recarga_extra_bs", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
+            ("metodo_pago", "VARCHAR(30)"),
         )
         for nombre, tipo in nuevos:
             if nombre not in columnas:
