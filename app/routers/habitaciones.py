@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 from datetime import timedelta
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
@@ -192,6 +193,7 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
             vehiculo_modelo=(data.vehiculo_modelo or None),
             vehiculo_color=(data.vehiculo_color or None),
             vehiculo_placa=(data.vehiculo_placa or None),
+            hora_ingreso=(data.hora_ingreso or None),
         )
         db.add(reserva)
 
@@ -212,6 +214,45 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
 # ---------------------------------------------------------------------------
 TIPOS_TASA_VALIDOS = {"bcv", "paralelo"}
 MONEDAS_PAGO_VALIDAS = {"usd", "bs", "mixto"}
+
+# Reglas de late check-out.
+HORA_SALIDA_ESTANDAR = "13:00"
+RECARGA_HORA_EXTRA_USD = Decimal("5")
+
+
+def _parsear_hora(valor: Optional[str]) -> Optional[Tuple[int, int]]:
+    """Convierte ``HH:MM`` a ``(hh, mm)``; devuelve ``None`` si no es v?lida."""
+    if not valor:
+        return None
+    txt = str(valor).strip()
+    if not txt:
+        return None
+    partes = txt.split(":")
+    try:
+        hh = int(partes[0])
+        mm = int(partes[1]) if len(partes) > 1 else 0
+    except (ValueError, IndexError):
+        return None
+    if not (0 <= hh < 24 and 0 <= mm < 60):
+        return None
+    return hh, mm
+
+
+def _calcular_horas_extra(hora_salida: Optional[str]) -> int:
+    """Horas (redondeo hacia arriba) por encima de las 13:00.
+
+    Si no se env?a hora o la hora es <= 13:00, devuelve ``0``.
+    """
+    parsed = _parsear_hora(hora_salida)
+    if not parsed:
+        return 0
+    hh, mm = parsed
+    minutos = hh * 60 + mm
+    minutos_estandar = 13 * 60
+    if minutos <= minutos_estandar:
+        return 0
+    return int(math.ceil((minutos - minutos_estandar) / 60.0))
+
 
 # Mapeo opci?n combinada ? (moneda_pago, metodo_pago)
 OPCION_PAGO_MAP: dict[str, tuple[str, str]] = {
@@ -256,6 +297,7 @@ def _calcular_preview(
     db: Session,
     habitacion: Habitacion,
     tasa_tipo: str = "bcv",
+    hora_salida: Optional[str] = None,
 ) -> HabitacionCheckoutPreview:
     tasa_tipo = (tasa_tipo or "bcv").lower().strip()
     if tasa_tipo not in TIPOS_TASA_VALIDOS:
@@ -288,13 +330,22 @@ def _calcular_preview(
     # Tasa de referencia del d?a (BCV o paralelo seg?n lo pedido).
     tasa_aplicada = Decimal(obtener_tasa_dia(db, tipo=tasa_tipo))
 
+    # Recargo por late check-out (despu?s de las 13:00).
+    horas_extra = _calcular_horas_extra(hora_salida)
+    recarga_extra_usd = (
+        (Decimal(horas_extra) * RECARGA_HORA_EXTRA_USD).quantize(Decimal("0.01"))
+        if horas_extra > 0
+        else Decimal("0")
+    )
+    recarga_extra_bs = (recarga_extra_usd * tasa_aplicada).quantize(Decimal("0.01"))
+
     # Los importes en bol?vares se recalculan SIEMPRE con la tasa solicitada
     # para que el monto a cobrar refleje la moneda elegida en el check-out,
     # independientemente de la tasa usada al check-in.
     tarifa_bs = (tarifa_usd * tasa_aplicada).quantize(Decimal("0.01"))
     consumos_bs = (consumos_usd * tasa_aplicada).quantize(Decimal("0.01"))
 
-    total_usd = (tarifa_usd + consumos_usd).quantize(Decimal("0.01"))
+    total_usd = (tarifa_usd + consumos_usd + recarga_extra_usd).quantize(Decimal("0.01"))
     total_bs = (total_usd * tasa_aplicada).quantize(Decimal("0.01"))
 
     return HabitacionCheckoutPreview(
@@ -312,6 +363,11 @@ def _calcular_preview(
         tasa_tipo=tasa_tipo,
         tasa_aplicada=tasa_aplicada,
         pedidos=pedidos_ids,
+        hora_salida_estandar=HORA_SALIDA_ESTANDAR,
+        hora_salida=hora_salida or None,
+        horas_extra=horas_extra,
+        recarga_extra_usd=recarga_extra_usd,
+        recarga_extra_bs=recarga_extra_bs,
     )
 
 
@@ -319,10 +375,13 @@ def _calcular_preview(
 def checkout_preview(
     habitacion_id: int,
     tasa_tipo: str = "bcv",
+    hora_salida: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     habitacion = _cargar_habitacion(db, habitacion_id)
-    return _calcular_preview(db, habitacion, tasa_tipo=tasa_tipo)
+    return _calcular_preview(
+        db, habitacion, tasa_tipo=tasa_tipo, hora_salida=hora_salida
+    )
 
 
 @router.get("/{habitacion_id}/checkin-cotizacion")
@@ -400,7 +459,9 @@ def checkout(
         )
 
     try:
-        preview = _calcular_preview(db, habitacion, tasa_tipo=tasa_tipo)
+        preview = _calcular_preview(
+            db, habitacion, tasa_tipo=tasa_tipo, hora_salida=data.hora_salida
+        )
 
         # Reparto del cobro entre USD y Bs seg?n la moneda elegida:
         #   - usd  ? todo en d?lares (sin tasa).
@@ -455,6 +516,10 @@ def checkout(
             reserva.total_consumos_usd = preview.consumos_usd
             reserva.total_final_bs = pagado_bs_total
             reserva.total_final_usd = pagado_usd_total
+            reserva.hora_salida = (data.hora_salida or HORA_SALIDA_ESTANDAR)
+            reserva.horas_extra = int(preview.horas_extra or 0)
+            reserva.recarga_extra_usd = preview.recarga_extra_usd
+            reserva.recarga_extra_bs = preview.recarga_extra_bs
             reserva.updated_at = ahora
 
         habitacion.estado = "limpieza"

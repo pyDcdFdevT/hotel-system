@@ -541,6 +541,63 @@ def test_ventas_por_area(client):
     assert float(data["total_usd"]) >= 18.0
 
 
+def test_checkin_hora_ingreso(client):
+    """El check-in acepta hora_ingreso opcional y la persiste en la reserva."""
+    habs = client.get("/api/habitaciones/").json()
+    libre = next(h for h in habs if h["estado"] == "disponible" and h["numero"] == "109")
+    resp = client.post(
+        f"/api/habitaciones/{libre['id']}/checkin",
+        json={
+            "huesped": "Cliente Hora",
+            "noches": 1,
+            "hora_ingreso": "15:30",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["hora_ingreso"] == "15:30"
+
+
+def test_checkout_horas_extra(client):
+    """Salida 15:30 → 3 horas extra (ceil((2.5))) × $5 = $15 de recargo."""
+    habs = client.get("/api/habitaciones/").json()
+    hab = next(h for h in habs if h["estado"] == "disponible" and h["numero"] == "110")
+    client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={"huesped": "Late Checkout", "noches": 1},
+    )
+
+    # Preview con hora_salida tarde.
+    preview = client.get(
+        f"/api/habitaciones/{hab['id']}/checkout-preview",
+        params={"hora_salida": "15:30"},
+    ).json()
+    assert preview["horas_extra"] == 3
+    assert float(preview["recarga_extra_usd"]) == 15.00
+    # Total = tarifa $20 + recarga $15 = $35
+    assert float(preview["total_usd"]) == 35.00
+
+    # Preview con hora estándar: sin recargo.
+    preview_std = client.get(
+        f"/api/habitaciones/{hab['id']}/checkout-preview",
+        params={"hora_salida": "13:00"},
+    ).json()
+    assert preview_std["horas_extra"] == 0
+    assert float(preview_std["recarga_extra_usd"]) == 0
+    assert float(preview_std["total_usd"]) == 20.00
+
+    # Cierre con hora 14:00 (1h extra → $5).
+    resp = client.post(
+        f"/api/habitaciones/{hab['id']}/checkout",
+        json={"opcion_pago": "efectivo_usd", "hora_salida": "14:00"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["horas_extra"] == 1
+    assert float(body["recarga_extra_usd"]) == 5.00
+    assert float(body["total_usd"]) == 25.00
+
+
 def test_checkout_opcion_pago_unificada(client, anon_client):
     """El frontend envía ``opcion_pago``; backend mapea a moneda+método."""
     habs = client.get("/api/habitaciones/").json()

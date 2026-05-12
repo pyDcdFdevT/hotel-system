@@ -1,4 +1,10 @@
-import { get, formatBs, formatUsd, showToast } from "./api.js";
+import {
+  get,
+  formatBs,
+  formatUsd,
+  formatFechaHoraVe,
+  showToast,
+} from "./api.js";
 import { refreshHeaderTasas } from "./config.js";
 
 const els = {
@@ -78,13 +84,7 @@ async function loadUltimasTransacciones() {
       els.tablaTx.innerHTML = filas.map(renderTxFila).join("");
     }
     if (els.txActualizado) {
-      const ahora = new Date().toLocaleTimeString("es-VE", {
-        timeZone: "America/Caracas",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-      els.txActualizado.textContent = `Actualizado ${ahora}`;
+      els.txActualizado.textContent = `Actualizado ${formatFechaHoraVe(new Date())}`;
     }
   } catch (error) {
     els.tablaTx.innerHTML = `<tr><td colspan="6"><div class="empty-state">${error.message}</div></td></tr>`;
@@ -92,15 +92,7 @@ async function loadUltimasTransacciones() {
 }
 
 function renderTxFila(tx) {
-  const fecha = tx.fecha
-    ? new Date(tx.fecha).toLocaleString("es-VE", {
-        timeZone: "America/Caracas",
-        day: "2-digit",
-        month: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "";
+  const fecha = tx.fecha ? formatFechaHoraVe(tx.fecha) : "-";
   const badge = TX_BADGES[tx.tipo] || {
     etiqueta: tx.tipo || "venta",
     clase: "badge-info",

@@ -7,6 +7,7 @@ import {
   formatBs,
   formatUsd,
   formatDate,
+  formatFechaHoraVe,
 } from "./api.js";
 
 const ESTADOS = [
@@ -53,6 +54,7 @@ const els = {
   checkoutMixtoRow: document.getElementById("checkout-mixto-row"),
   checkoutMixtoUsd: document.getElementById("checkout-mixto-usd"),
   checkoutMixtoBs: document.getElementById("checkout-mixto-bs"),
+  checkoutHora: document.getElementById("checkout-hora"),
 };
 
 // Mapeo opción → {moneda, metodo} (espejo del backend).
@@ -107,6 +109,8 @@ export async function initHabitaciones() {
   }
   if (els.checkoutMixtoUsd)
     els.checkoutMixtoUsd.addEventListener("input", recargarPreviewCheckout);
+  if (els.checkoutHora)
+    els.checkoutHora.addEventListener("change", recargarPreviewCheckout);
 
   await loadHabitaciones();
 }
@@ -342,6 +346,7 @@ async function confirmarCheckin(event) {
     vehiculo_modelo: formData.get("vehiculo_modelo")?.toString().trim() || null,
     vehiculo_color: formData.get("vehiculo_color")?.toString().trim() || null,
     vehiculo_placa: formData.get("vehiculo_placa")?.toString().trim() || null,
+    hora_ingreso: formData.get("hora_ingreso")?.toString() || null,
   };
   if (!payload.huesped) {
     showToast("Indique el nombre del huésped", "error");
@@ -367,6 +372,8 @@ async function abrirCheckout(habId) {
   if (!els.modalCheckout) return;
   els.formCheckout?.reset();
   if (els.checkoutHabId) els.checkoutHabId.value = habId;
+  // Hora de salida estándar (cambio manual permitido).
+  if (els.checkoutHora) els.checkoutHora.value = "13:00";
   // Reseteamos al estado inicial: Efectivo USD.
   seleccionarOpcionPagoPorClave("efectivo_usd");
   if (els.checkoutResumen) {
@@ -418,14 +425,18 @@ async function recargarPreviewCheckout() {
   if (!habId) return;
   const { moneda } = opcionActual();
   const tasaTipo = els.checkoutTasaTipo?.value || "bcv";
+  const horaSalida = els.checkoutHora?.value || "13:00";
   try {
+    const params = new URLSearchParams({
+      tasa_tipo: tasaTipo,
+      hora_salida: horaSalida,
+    });
     const preview = await get(
-      `/habitaciones/${habId}/checkout-preview?tasa_tipo=${tasaTipo}`,
+      `/habitaciones/${habId}/checkout-preview?${params}`,
     );
     if (els.checkoutResumen) {
       els.checkoutResumen.innerHTML = renderPreview(preview, moneda);
     }
-    // Si es mixto, sugerimos por defecto el faltante en Bs.
     if (moneda === "mixto" && els.checkoutMixtoUsd && els.checkoutMixtoBs) {
       const recibidoUsd = Number(els.checkoutMixtoUsd.value || 0);
       const faltanteUsd = Math.max(
@@ -458,11 +469,19 @@ function renderPreview(p, moneda = "usd") {
     totalDestacado = `<strong>Total a cobrar: ${formatUsd(p.total_usd)}</strong>
       <p class="text-xs text-slate-500">Sin tasa (efectivo en dólares)</p>`;
   }
+  const extras =
+    Number(p.horas_extra || 0) > 0
+      ? `<li class="text-amber-700">⏰ Late check-out: ${p.horas_extra} h × $5
+           = ${formatUsd(p.recarga_extra_usd)}${moneda !== "usd" ? ` · ${formatBs(p.recarga_extra_bs)}` : ""}
+           <span class="text-xs text-slate-500">(salida ${p.hora_salida || ""}, estándar ${p.hora_salida_estandar || "13:00"})</span>
+         </li>`
+      : `<li class="text-xs text-slate-500">Salida ${p.hora_salida || p.hora_salida_estandar || "13:00"} · sin recargo</li>`;
   return `
     <p><strong>Habitación #${p.numero}</strong>${p.huesped ? ` · ${p.huesped}` : ""}</p>
     <ul class="text-sm space-y-1 mt-2">
       <li>Estadía (${p.noches} noche${p.noches === 1 ? "" : "s"}): ${formatUsd(p.tarifa_usd)}${moneda !== "usd" ? ` · ${formatBs(p.tarifa_bs)}` : ""}</li>
       <li>Consumos: ${formatUsd(p.consumos_usd)}${moneda !== "usd" ? ` · ${formatBs(p.consumos_bs)}` : ""}</li>
+      ${extras}
       <li class="border-t pt-1">${totalDestacado}</li>
     </ul>
     ${pedidos}
@@ -487,6 +506,7 @@ async function confirmarCheckout(event) {
         : "bcv",
     cuenta_banco_id: Number(formData.get("cuenta_banco_id")) || null,
     notas: formData.get("notas")?.toString() || null,
+    hora_salida: formData.get("hora_salida")?.toString() || "13:00",
   };
   if (moneda === "mixto") {
     payload.monto_recibido_usd = Number(formData.get("monto_recibido_usd") || 0);

@@ -147,12 +147,28 @@ export function formatTimeVE(value) {
   });
 }
 
-export function nowVE() {
-  return new Date().toLocaleString("es-VE", {
-    dateStyle: "short",
-    timeStyle: "short",
+/**
+ * Devuelve la fecha en hora local Venezuela con segundos y AM/PM.
+ * Ejemplo: ``12/05/2026, 11:48:23 a. m.``
+ */
+export function formatFechaHoraVe(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("es-VE", {
     timeZone: VE_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
   });
+}
+
+export function nowVE() {
+  return formatFechaHoraVe(new Date());
 }
 
 export function showToast(message, type = "info") {

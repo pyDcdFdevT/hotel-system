@@ -296,7 +296,7 @@ def _migrar_pedidos_habitacion(engine) -> None:
 
 
 def _migrar_reservas_vehiculo(engine) -> None:
-    """Añade columnas opcionales del vehículo del huésped a ``reservas``."""
+    """Añade columnas del vehículo y de horas/recargos a ``reservas``."""
     if not _is_sqlite(engine):
         return
     from sqlalchemy import text
@@ -313,6 +313,11 @@ def _migrar_reservas_vehiculo(engine) -> None:
             ("vehiculo_modelo", "VARCHAR(100)"),
             ("vehiculo_color", "VARCHAR(50)"),
             ("vehiculo_placa", "VARCHAR(20)"),
+            ("hora_ingreso", "VARCHAR(10)"),
+            ("hora_salida", "VARCHAR(10)"),
+            ("horas_extra", "INTEGER NOT NULL DEFAULT 0"),
+            ("recarga_extra_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
+            ("recarga_extra_bs", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
         )
         for nombre, tipo in nuevos:
             if nombre not in columnas:

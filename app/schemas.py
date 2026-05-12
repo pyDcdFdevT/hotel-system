@@ -90,6 +90,8 @@ class ReservaCreate(BaseModel):
     vehiculo_modelo: Optional[str] = Field(default=None, max_length=100)
     vehiculo_color: Optional[str] = Field(default=None, max_length=50)
     vehiculo_placa: Optional[str] = Field(default=None, max_length=20)
+    hora_ingreso: Optional[str] = Field(default=None, max_length=10)
+    hora_salida: Optional[str] = Field(default=None, max_length=10)
 
 
 class ReservaCheckout(BaseModel):
@@ -115,6 +117,8 @@ class HabitacionCheckinRequest(BaseModel):
     vehiculo_modelo: Optional[str] = Field(default=None, max_length=100)
     vehiculo_color: Optional[str] = Field(default=None, max_length=50)
     vehiculo_placa: Optional[str] = Field(default=None, max_length=20)
+    hora_ingreso: Optional[str] = Field(default=None, max_length=10)
+    """Hora manual de ingreso del huésped (formato ``HH:MM``)."""
 
 
 class HabitacionCheckoutRequest(BaseModel):
@@ -142,6 +146,8 @@ class HabitacionCheckoutRequest(BaseModel):
     monto_recibido_bs: Decimal = Field(default=Decimal("0"), ge=0)
     monto_recibido_usd: Decimal = Field(default=Decimal("0"), ge=0)
     notas: Optional[str] = None
+    hora_salida: Optional[str] = Field(default=None, max_length=10)
+    """Hora manual de salida (formato ``HH:MM``). Si excede 13:00 se aplica recargo."""
 
 
 class HabitacionCheckoutPreview(BaseModel):
@@ -161,6 +167,11 @@ class HabitacionCheckoutPreview(BaseModel):
     tasa_tipo: str = "bcv"
     tasa_aplicada: Decimal = Decimal("0")
     pedidos: List[int] = []
+    hora_salida_estandar: str = "13:00"
+    hora_salida: Optional[str] = None
+    horas_extra: int = 0
+    recarga_extra_usd: Decimal = Decimal("0")
+    recarga_extra_bs: Decimal = Decimal("0")
 
 
 class ReservaOut(ORMModel):
@@ -183,6 +194,11 @@ class ReservaOut(ORMModel):
     vehiculo_modelo: Optional[str] = None
     vehiculo_color: Optional[str] = None
     vehiculo_placa: Optional[str] = None
+    hora_ingreso: Optional[str] = None
+    hora_salida: Optional[str] = None
+    horas_extra: int = 0
+    recarga_extra_usd: Decimal = Decimal("0")
+    recarga_extra_bs: Decimal = Decimal("0")
     created_at: datetime
     updated_at: datetime
 

@@ -238,10 +238,14 @@
               <input type="date" name="fecha_checkout_estimado" class="w-full border rounded px-2 py-1" />
             </div>
           </div>
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-4 gap-2">
             <div>
               <label class="text-xs uppercase text-slate-500">Noches</label>
               <input id="checkin-noches" type="number" name="noches" min="1" value="1" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Hora ingreso</label>
+              <input id="checkin-hora" type="time" name="hora_ingreso" value="15:00" class="w-full border rounded px-2 py-1" />
             </div>
             <div>
               <label class="text-xs uppercase text-slate-500">Precio / noche USD</label>
@@ -326,12 +330,19 @@
             </button>
           </div>
 
-          <div id="checkout-tasa-row" class="hidden">
-            <label class="text-xs uppercase text-slate-500">Tasa a aplicar (Bs)</label>
-            <select id="checkout-tasa-tipo" name="tasa_tipo" class="w-full border rounded px-2 py-1">
-              <option value="bcv">BCV</option>
-              <option value="paralelo">Paralelo</option>
-            </select>
+          <div class="grid grid-cols-2 gap-2 items-end">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Hora de salida</label>
+              <input id="checkout-hora" type="time" name="hora_salida" value="13:00" class="w-full border rounded px-2 py-1" />
+              <p class="text-xs text-slate-500 mt-1">Estándar 13:00 · cada hora extra suma $5</p>
+            </div>
+            <div id="checkout-tasa-row" class="hidden">
+              <label class="text-xs uppercase text-slate-500">Tasa a aplicar (Bs)</label>
+              <select id="checkout-tasa-tipo" name="tasa_tipo" class="w-full border rounded px-2 py-1">
+                <option value="bcv">BCV</option>
+                <option value="paralelo">Paralelo</option>
+              </select>
+            </div>
           </div>
 
           <div id="checkout-resumen" class="border rounded p-3 bg-slate-50"></div>
