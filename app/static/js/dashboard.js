@@ -1,4 +1,5 @@
 import { get, formatBs, formatUsd, formatRate, showToast } from "./api.js";
+import { refreshHeaderTasas } from "./config.js";
 
 const els = {
   ventasBs: document.getElementById("dash-ventas-bs"),
@@ -9,13 +10,15 @@ const els = {
   ocupacion: document.getElementById("dash-ocupacion"),
   habsOcupadas: document.getElementById("dash-habs-ocupadas"),
   bajoStock: document.getElementById("dash-bajo-stock"),
-  tasaDia: document.getElementById("dash-tasa-dia"),
   tablaBajoStock: document.getElementById("dash-tabla-bajo-stock"),
 };
 
 export async function loadDashboard() {
   try {
-    const resumen = await get("/reportes/resumen-dia");
+    const [resumen] = await Promise.all([
+      get("/reportes/resumen-dia"),
+      refreshHeaderTasas(),
+    ]);
     if (els.ventasBs) els.ventasBs.textContent = formatBs(resumen.ventas_bs);
     if (els.ventasUsd) els.ventasUsd.textContent = formatUsd(resumen.ventas_usd);
     if (els.gastosBs) els.gastosBs.textContent = formatBs(resumen.gastos_bs);
@@ -26,7 +29,6 @@ export async function loadDashboard() {
       els.habsOcupadas.textContent = `${resumen.habitaciones_ocupadas} / ${resumen.habitaciones_totales}`;
     }
     if (els.bajoStock) els.bajoStock.textContent = resumen.productos_bajo_stock;
-    if (els.tasaDia) els.tasaDia.textContent = formatRate(resumen.tasa_dia);
 
     await loadBajoStockTabla();
   } catch (error) {

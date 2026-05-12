@@ -25,7 +25,8 @@ from app.models import (
 )
 
 
-TASA_INICIAL = Decimal("405.35")
+TASA_INICIAL_BCV = Decimal("405.35")
+TASA_INICIAL_PARALELO = Decimal("415.00")
 
 
 HABITACIONES_INICIALES = [
@@ -53,13 +54,19 @@ CATEGORIAS_GASTO = [
 
 
 CUENTAS_INICIALES = [
-    {"nombre": "BcoVen", "tipo": "banco", "moneda": "BS", "saldo": Decimal("0")},
-    {"nombre": "BcoHLC", "tipo": "banco", "moneda": "BS", "saldo": Decimal("0")},
-    {"nombre": "BcoP", "tipo": "banco", "moneda": "BS", "saldo": Decimal("0")},
-    {"nombre": "BcoZ", "tipo": "banco", "moneda": "BS", "saldo": Decimal("0")},
-    {"nombre": "EfectivoBs", "tipo": "caja", "moneda": "BS", "saldo": Decimal("0")},
-    {"nombre": "EfectivoUsd", "tipo": "caja", "moneda": "USD", "saldo": Decimal("0")},
+    {"nombre": "Banco HLC", "tipo": "banco", "moneda": "BS", "saldo": Decimal("0")},
+    {"nombre": "Banco Z", "tipo": "banco", "moneda": "BS", "saldo": Decimal("0")},
+    {"nombre": "Efectivo Bs", "tipo": "caja", "moneda": "BS", "saldo": Decimal("0")},
+    {"nombre": "Efectivo USD", "tipo": "caja", "moneda": "USD", "saldo": Decimal("0")},
 ]
+
+
+CUENTAS_RENOMBRADAS = {
+    "BcoHLC": "Banco HLC",
+    "BcoZ": "Banco Z",
+    "EfectivoBs": "Efectivo Bs",
+    "EfectivoUsd": "Efectivo USD",
+}
 
 
 PRODUCTOS_INICIALES = [
@@ -163,11 +170,33 @@ def seed() -> None:
             print("Seed omitido: la base ya tiene datos.")
             return
 
-        if not db.query(TasaCambio).filter(TasaCambio.fecha == today()).first():
-            db.add(TasaCambio(fecha=today(), usd_a_ves=TASA_INICIAL))
+        if (
+            not db.query(TasaCambio)
+            .filter(TasaCambio.fecha == today(), TasaCambio.tipo == "bcv")
+            .first()
+        ):
+            db.add(TasaCambio(fecha=today(), tipo="bcv", usd_a_ves=TASA_INICIAL_BCV))
+        if (
+            not db.query(TasaCambio)
+            .filter(TasaCambio.fecha == today(), TasaCambio.tipo == "paralelo")
+            .first()
+        ):
+            db.add(
+                TasaCambio(fecha=today(), tipo="paralelo", usd_a_ves=TASA_INICIAL_PARALELO)
+            )
 
         for cat in CATEGORIAS_GASTO:
             _upsert(db, CategoriaGasto, {"nombre": cat["nombre"]}, cat)
+
+        # Renombrar cuentas antiguas si existen (mantiene saldos y movimientos).
+        for nombre_viejo, nombre_nuevo in CUENTAS_RENOMBRADAS.items():
+            cuenta_vieja = (
+                db.query(CuentaBanco).filter(CuentaBanco.nombre == nombre_viejo).first()
+            )
+            if cuenta_vieja and not (
+                db.query(CuentaBanco).filter(CuentaBanco.nombre == nombre_nuevo).first()
+            ):
+                cuenta_vieja.nombre = nombre_nuevo
 
         for cuenta in CUENTAS_INICIALES:
             _upsert(db, CuentaBanco, {"nombre": cuenta["nombre"]}, cuenta)

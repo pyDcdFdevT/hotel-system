@@ -14,9 +14,14 @@
         <h1 class="text-2xl font-bold">Hotel · Gestión Integral</h1>
         <p class="text-sm opacity-80">Habitaciones, reservas, POS, inventario y gastos</p>
       </div>
-      <div class="text-right">
-        <p class="text-xs uppercase tracking-wider opacity-80">Tasa de hoy</p>
-        <p class="text-xl font-semibold"><span id="dash-tasa-dia">--</span> <span class="text-sm opacity-80">Bs / USD</span></p>
+      <div class="text-right text-sm">
+        <p class="text-xs uppercase tracking-wider opacity-80">Tasas USD → Bs</p>
+        <p class="font-semibold">
+          BCV: <span id="header-tasa-bcv">--</span> Bs
+          <span class="opacity-50 mx-1">|</span>
+          Paralelo: <span id="header-tasa-paralelo">--</span> Bs
+        </p>
+        <p class="text-xs opacity-70" id="header-tasa-fecha"></p>
       </div>
     </div>
     <nav class="bg-slate-900/60">
@@ -27,6 +32,7 @@
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="pos">POS</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="inventario">Inventario</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="gastos">Gastos</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="config">Configuración</button>
       </div>
     </nav>
   </header>
@@ -63,6 +69,14 @@
         <div class="card p-4">
           <p class="text-xs uppercase text-slate-500">Bajo stock</p>
           <p class="text-2xl font-bold mt-1" id="dash-bajo-stock">--</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Tasa BCV</p>
+          <p class="text-2xl font-bold mt-1"><span id="dash-tasa-bcv">--</span> Bs</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Tasa Paralelo</p>
+          <p class="text-2xl font-bold mt-1"><span id="dash-tasa-paralelo">--</span> Bs</p>
         </div>
       </div>
       <div class="card p-4 mt-6">
@@ -342,12 +356,21 @@
           <h3 class="text-lg font-semibold">Cobrar pedido</h3>
           <div id="pago-resumen" class="text-sm space-y-1"></div>
           <div>
+            <label class="text-xs uppercase text-slate-500">Tasa a usar</label>
+            <select id="pago-tasa-tipo" name="tasa_tipo" class="w-full border rounded px-2 py-1">
+              <option value="bcv">BCV</option>
+              <option value="paralelo">Paralelo</option>
+            </select>
+            <p class="text-xs text-slate-500 mt-1" id="pago-tasa-info">Tasa BCV: -- Bs/USD</p>
+          </div>
+          <div>
             <label class="text-xs uppercase text-slate-500">Método</label>
-            <select name="metodo_pago" class="w-full border rounded px-2 py-1">
+            <select id="pago-metodo" name="metodo_pago" class="w-full border rounded px-2 py-1">
               <option value="bs">Bolívares</option>
               <option value="usd">Dólares</option>
               <option value="mixto">Mixto (Bs + USD)</option>
               <option value="transferencia">Transferencia</option>
+              <option value="pagomovil">📱 Pago Móvil</option>
             </select>
           </div>
           <div class="grid grid-cols-2 gap-2">
@@ -364,9 +387,12 @@
             <label class="text-xs uppercase text-slate-500">Cuenta banco</label>
             <select id="pago-cuenta" name="cuenta_banco_id" class="w-full border rounded px-2 py-1"></select>
           </div>
-          <div class="flex justify-end gap-2 pt-2">
-            <button type="button" id="pago-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
-            <button type="submit" class="px-3 py-1 bg-emerald-600 text-white rounded">Confirmar pago</button>
+          <div class="flex flex-wrap justify-between gap-2 pt-2">
+            <button type="button" id="pago-btn-pagomovil" class="px-3 py-1 rounded bg-purple-600 text-white text-sm">📱 Pago Móvil</button>
+            <div class="flex gap-2">
+              <button type="button" id="pago-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+              <button type="submit" class="px-3 py-1 bg-emerald-600 text-white rounded">Confirmar pago</button>
+            </div>
           </div>
         </form>
       </div>
@@ -447,12 +473,68 @@
                   <th>Mínimo</th>
                   <th>Venta</th>
                   <th>Estado</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="inv-tabla-productos"></tbody>
             </table>
           </div>
         </div>
+      </div>
+
+      <div id="modal-producto" class="modal-backdrop hidden">
+        <form id="form-editar-producto" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold">Editar producto</h3>
+          <input type="hidden" name="id" />
+          <div>
+            <label class="text-xs uppercase text-slate-500">Nombre</label>
+            <input name="nombre" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Categoría</label>
+              <input name="categoria" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Unidad</label>
+              <input name="unidad" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Precio Bs</label>
+              <input type="number" step="0.01" name="precio_bs" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Precio USD</label>
+              <input type="number" step="0.01" name="precio_usd" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Costo Bs</label>
+              <input type="number" step="0.01" name="costo_bs" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Stock</label>
+              <input type="number" step="0.01" name="stock_actual" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Stock mínimo</label>
+              <input type="number" step="0.01" name="stock_minimo" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="es_para_venta" /> Es para venta directa
+          </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="activo" /> Activo
+          </label>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="editar-producto-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Guardar cambios</button>
+          </div>
+        </form>
       </div>
 
       <div class="grid lg:grid-cols-3 gap-6 mt-6">
@@ -604,6 +686,41 @@
         </div>
       </div>
     </section>
+
+    <!-- Configuración -->
+    <section id="tab-config" class="tab-panel">
+      <div class="grid lg:grid-cols-2 gap-6">
+        <form id="form-tasas" class="card p-5 space-y-3">
+          <h2 class="text-lg font-semibold">Tasas de cambio del día</h2>
+          <p class="text-xs text-slate-500">Estas tasas se utilizan al cobrar pedidos del POS.</p>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Tasa BCV (Bs / USD)</label>
+            <input id="config-tasa-bcv" type="number" step="0.0001" min="0" name="bcv" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Tasa Paralelo (Bs / USD)</label>
+            <input id="config-tasa-paralelo" type="number" step="0.0001" min="0" name="paralelo" class="w-full border rounded px-2 py-1" />
+          </div>
+          <button type="submit" class="w-full px-3 py-2 rounded bg-blue-600 text-white">Guardar tasas</button>
+          <p class="text-xs text-slate-500" id="config-tasa-feedback"></p>
+        </form>
+        <div class="card p-5">
+          <h2 class="text-lg font-semibold mb-3">Historial reciente</h2>
+          <div class="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Tipo</th>
+                  <th>Bs / USD</th>
+                </tr>
+              </thead>
+              <tbody id="config-tabla-tasas"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <div id="toast-container" class="fixed bottom-4 right-4 z-50"></div>
@@ -615,6 +732,7 @@
     import { initPedidos } from "/static/js/pedidos.js";
     import { initInventario } from "/static/js/inventario.js";
     import { initGastos } from "/static/js/gastos.js";
+    import { initConfig, refreshHeaderTasas } from "/static/js/config.js";
 
     const tabs = document.querySelectorAll(".tab-btn");
     const panels = document.querySelectorAll(".tab-panel");
@@ -625,6 +743,7 @@
       pos: () => initPedidos(),
       inventario: () => initInventario(),
       gastos: () => initGastos(),
+      config: () => initConfig(),
     };
     const loaded = new Set();
 
@@ -641,6 +760,8 @@
 
     tabs.forEach((btn) => btn.addEventListener("click", () => activate(btn.dataset.tab)));
 
+    refreshHeaderTasas();
+    setInterval(() => refreshHeaderTasas(), 60_000);
     activate("dashboard");
   </script>
 </body>

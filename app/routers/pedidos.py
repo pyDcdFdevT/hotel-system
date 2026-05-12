@@ -24,14 +24,22 @@ from app.schemas import (
     PedidoPago,
 )
 from app.services.inventario_service import descontar_inventario_por_receta
-from app.services.tasa_service import obtener_tasa_dia
+from app.services.tasa_service import obtener_tasa_bcv, obtener_tasa_dia
 
 
 router = APIRouter(prefix="/pedidos", tags=["pedidos"])
 
 
 TIPOS_VALIDOS = {"restaurante", "bar", "habitacion", "general"}
-METODOS_VALIDOS = {"bs", "usd", "mixto", "habitacion", "transferencia"}
+METODOS_VALIDOS = {
+    "bs",
+    "usd",
+    "mixto",
+    "habitacion",
+    "transferencia",
+    "pagomovil",
+}
+TIPOS_TASA_VALIDOS = {"bcv", "paralelo"}
 
 
 def _cargar_pedido(db: Session, pedido_id: int) -> Pedido:
@@ -88,7 +96,7 @@ def crear_pedido(data: PedidoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"Tipo inválido. Use: {sorted(TIPOS_VALIDOS)}")
 
     try:
-        tasa = obtener_tasa_dia(db)
+        tasa = obtener_tasa_bcv(db)
         pedido = Pedido(
             tipo=data.tipo,
             mesa=data.mesa,
@@ -168,14 +176,28 @@ def pagar_pedido(pedido_id: int, data: PedidoPago, db: Session = Depends(get_db)
         )
 
     try:
-        tasa = Decimal(pedido.tasa_usd_del_dia or 0) or obtener_tasa_dia(db)
+        tasa_tipo = (data.tasa_tipo or "bcv").lower().strip()
+        if tasa_tipo not in TIPOS_TASA_VALIDOS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tipo de tasa inválido. Use: {sorted(TIPOS_TASA_VALIDOS)}",
+            )
+
+        tasa_seleccionada = obtener_tasa_dia(db, tipo=tasa_tipo)
+        tasa = tasa_seleccionada or Decimal(pedido.tasa_usd_del_dia or 0)
         if tasa <= 0:
             raise HTTPException(status_code=400, detail="Tasa de cambio inválida")
+
         # total_bs y total_usd son el MISMO monto en dos monedas. Usamos Bs como base.
         total_bs_total = Decimal(pedido.total_bs or 0)
 
         pago_bs = Decimal(data.monto_bs or 0)
         pago_usd = Decimal(data.monto_usd or 0)
+
+        # Pago Móvil: se cobra el total en Bs usando la tasa elegida.
+        if data.metodo_pago == "pagomovil" and pago_bs == 0 and pago_usd == 0:
+            pago_bs = total_bs_total
+
         pago_equivalente_bs = pago_bs + (pago_usd * tasa)
 
         if pago_equivalente_bs + Decimal("0.01") < total_bs_total:
@@ -198,6 +220,7 @@ def pagar_pedido(pedido_id: int, data: PedidoPago, db: Session = Depends(get_db)
         pedido.vuelto_bs = vuelto_bs
         pedido.vuelto_usd = vuelto_usd
         pedido.metodo_pago = data.metodo_pago
+        pedido.tasa_usd_del_dia = tasa
         pedido.estado = "pagado"
         pedido.updated_at = utc_now()
 
@@ -214,7 +237,7 @@ def pagar_pedido(pedido_id: int, data: PedidoPago, db: Session = Depends(get_db)
                     tipo="entrada",
                     monto=monto_movimiento,
                     saldo_resultante=cuenta.saldo,
-                    concepto=f"Pago pedido #{pedido.id}",
+                    concepto=f"Pago pedido #{pedido.id} ({data.metodo_pago})",
                     referencia=f"pedido:{pedido.id}",
                 )
             )

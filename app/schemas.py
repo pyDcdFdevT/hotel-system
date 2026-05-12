@@ -17,13 +17,21 @@ class ORMModel(BaseModel):
 class TasaCambioOut(ORMModel):
     id: int
     fecha: date
+    tipo: str = "bcv"
     usd_a_ves: Decimal
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
 
 class TasaCambioCreate(BaseModel):
     usd_a_ves: Decimal = Field(..., gt=0)
     fecha: Optional[date] = None
+    tipo: Optional[str] = Field(default="bcv", max_length=20)
+
+
+class TasasActualesOut(BaseModel):
+    fecha: date
+    bcv: Decimal
+    paralelo: Decimal
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +206,7 @@ class PedidoPago(BaseModel):
     monto_bs: Decimal = Field(default=Decimal("0"), ge=0)
     monto_usd: Decimal = Field(default=Decimal("0"), ge=0)
     cuenta_banco_id: Optional[int] = Field(default=None, gt=0)
+    tasa_tipo: Optional[str] = Field(default=None, max_length=20)
 
 
 class PedidoCargoHabitacion(BaseModel):

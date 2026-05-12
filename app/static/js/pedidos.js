@@ -7,6 +7,7 @@ import {
   formatUsd,
   formatRate,
 } from "./api.js";
+import { getCacheTasas, refreshHeaderTasas } from "./config.js";
 
 const state = {
   productos: [],
@@ -14,7 +15,8 @@ const state = {
   tipo: "restaurante",
   reservaId: null,
   pedidoActivo: null,
-  tasa: 405.35,
+  tasas: { bcv: 405.35, paralelo: 415.0 },
+  tasaTipo: "bcv",
 };
 
 const els = {
@@ -38,6 +40,10 @@ const els = {
   cuentaPago: document.getElementById("pago-cuenta"),
   btnPagar: document.getElementById("pos-btn-pagar"),
   pedidosActivos: document.getElementById("pos-pedidos-activos"),
+  pagoMetodo: document.getElementById("pago-metodo"),
+  pagoTasaTipo: document.getElementById("pago-tasa-tipo"),
+  pagoTasaInfo: document.getElementById("pago-tasa-info"),
+  btnPagoMovil: document.getElementById("pago-btn-pagomovil"),
 };
 
 export async function initPedidos() {
@@ -72,9 +78,22 @@ export async function initPedidos() {
   if (els.formPago) {
     els.formPago.addEventListener("submit", confirmarPago);
   }
+  if (els.pagoTasaTipo) {
+    els.pagoTasaTipo.addEventListener("change", () => {
+      state.tasaTipo = els.pagoTasaTipo.value || "bcv";
+      actualizarInfoTasa();
+    });
+  }
+  if (els.pagoMetodo) {
+    els.pagoMetodo.addEventListener("change", actualizarInfoTasa);
+  }
+  if (els.btnPagoMovil) {
+    els.btnPagoMovil.addEventListener("click", iniciarPagoMovil);
+  }
+  document.addEventListener("tasas:actualizadas", actualizarTasasCache);
 
   await Promise.all([
-    cargarTasa(),
+    cargarTasas(),
     cargarProductos(),
     cargarReservasActivas(),
     cargarCuentas(),
@@ -82,13 +101,22 @@ export async function initPedidos() {
   ]);
 }
 
-async function cargarTasa() {
+function actualizarTasasCache(event) {
+  const detalle = event.detail || getCacheTasas();
+  if (detalle.bcv) state.tasas.bcv = Number(detalle.bcv);
+  if (detalle.paralelo) state.tasas.paralelo = Number(detalle.paralelo);
+  if (els.tasa) {
+    els.tasa.textContent = `BCV ${formatRate(state.tasas.bcv)} · Paralelo ${formatRate(state.tasas.paralelo)} Bs/USD`;
+  }
+  actualizarInfoTasa();
+}
+
+async function cargarTasas() {
   try {
-    const tasa = await get("/tasa/actual");
-    state.tasa = Number(tasa.usd_a_ves) || 405.35;
-    if (els.tasa) els.tasa.textContent = `Tasa día: ${formatRate(state.tasa)} Bs/USD`;
+    const tasas = await refreshHeaderTasas();
+    actualizarTasasCache({ detail: tasas });
   } catch (error) {
-    showToast(`Tasa no disponible, usando ${state.tasa}`, "info");
+    showToast(`Tasas no disponibles: ${error.message}`, "info");
   }
 }
 
@@ -315,7 +343,7 @@ function mostrarPedidoActivo(pedido) {
   els.pedidoInfo.innerHTML = `
     <p><strong>Pedido #${pedido.id}</strong> · ${pedido.tipo}</p>
     <p>Total: ${formatUsd(pedido.total_usd)} · ${formatBs(pedido.total_bs)}</p>
-    <p class="text-xs text-slate-500">Tasa: ${formatRate(pedido.tasa_usd_del_dia)} Bs/USD</p>
+    <p class="text-xs text-slate-500">Tasa registrada: ${formatRate(pedido.tasa_usd_del_dia)} Bs/USD</p>
   `;
   els.pedidoInfo.classList.remove("hidden");
   if (els.btnPagar) els.btnPagar.disabled = false;
@@ -332,6 +360,22 @@ async function seleccionarPedido(pedidoId) {
   }
 }
 
+function tasaActual() {
+  return state.tasaTipo === "paralelo" ? state.tasas.paralelo : state.tasas.bcv;
+}
+
+function actualizarInfoTasa() {
+  if (!els.pagoTasaInfo || !state.pedidoActivo) return;
+  const tasa = tasaActual();
+  const total_bs = Number(state.pedidoActivo.total_bs || 0);
+  const total_usd = Number(state.pedidoActivo.total_usd || 0);
+  const equivalente_bs = total_usd * tasa;
+  els.pagoTasaInfo.innerHTML = `
+    Tasa ${state.tasaTipo.toUpperCase()}: <strong>${formatRate(tasa)} Bs/USD</strong> ·
+    Equivalente: ${formatBs(equivalente_bs || total_bs)}
+  `;
+}
+
 function abrirModalPago() {
   if (!state.pedidoActivo) {
     showToast("Cree un pedido primero", "error");
@@ -343,15 +387,45 @@ function abrirModalPago() {
       <p><strong>Pedido #${p.id}</strong></p>
       <p>Total Bs: ${formatBs(p.total_bs)}</p>
       <p>Total USD: ${formatUsd(p.total_usd)}</p>
-      <p class="text-xs text-slate-500">Tasa: ${formatRate(p.tasa_usd_del_dia)}</p>
     `;
   }
   els.formPago?.reset();
+  if (els.pagoTasaTipo) {
+    els.pagoTasaTipo.value = state.tasaTipo;
+  }
+  actualizarInfoTasa();
   els.modalPago?.classList.remove("hidden");
 }
 
 function cerrarModalPago() {
   els.modalPago?.classList.add("hidden");
+}
+
+function iniciarPagoMovil() {
+  if (!state.pedidoActivo) {
+    showToast("Cree un pedido primero", "error");
+    return;
+  }
+  const tasa = tasaActual();
+  const total_bs = Number(state.pedidoActivo.total_bs || 0);
+  const total_usd = Number(state.pedidoActivo.total_usd || 0);
+  const totalBsTasa = total_usd * tasa;
+  const finalBs = total_bs > 0 ? total_bs : totalBsTasa;
+  const mensaje =
+    `Pago Móvil — Pedido #${state.pedidoActivo.id}\n` +
+    `Tasa ${state.tasaTipo.toUpperCase()}: ${formatRate(tasa)} Bs/USD\n` +
+    `Total a pagar:\n` +
+    `  ${formatBs(finalBs)}\n` +
+    `  (≈ ${formatUsd(total_usd)})\n\n` +
+    `¿Confirmar cobro por Pago Móvil?`;
+  if (!window.confirm(mensaje)) return;
+
+  if (els.pagoMetodo) els.pagoMetodo.value = "pagomovil";
+  const inputBs = els.formPago?.querySelector('[name="monto_bs"]');
+  const inputUsd = els.formPago?.querySelector('[name="monto_usd"]');
+  if (inputBs) inputBs.value = finalBs.toFixed(2);
+  if (inputUsd) inputUsd.value = "0";
+  els.formPago?.requestSubmit();
 }
 
 async function confirmarPago(event) {
@@ -362,16 +436,18 @@ async function confirmarPago(event) {
   const monto_usd = Number(formData.get("monto_usd") || 0);
   const metodo_pago = formData.get("metodo_pago") || "bs";
   const cuenta_banco_id = Number(formData.get("cuenta_banco_id")) || null;
+  const tasa_tipo = formData.get("tasa_tipo") || state.tasaTipo || "bcv";
   try {
     const pedido = await post(`/pedidos/${state.pedidoActivo.id}/pagar`, {
       metodo_pago,
       monto_bs,
       monto_usd,
       cuenta_banco_id,
+      tasa_tipo,
     });
     const vueltoBs = Number(pedido.vuelto_bs || 0);
     const vueltoUsd = Number(pedido.vuelto_usd || 0);
-    let mensaje = `Pedido #${pedido.id} pagado`;
+    let mensaje = `Pedido #${pedido.id} pagado (${metodo_pago})`;
     if (vueltoBs > 0 || vueltoUsd > 0) {
       mensaje += ` · Vuelto ${formatBs(vueltoBs)} / ${formatUsd(vueltoUsd)}`;
     }

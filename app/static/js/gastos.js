@@ -18,7 +18,11 @@ const els = {
   tablaCategorias: document.getElementById("tabla-categorias"),
 };
 
+// Nombres canónicos esperados (los crea/actualiza el seed).
+const BANCOS_ESPERADOS = ["Banco HLC", "Banco Z", "Efectivo Bs", "Efectivo USD"];
+
 let categoriasCache = [];
+let cuentasCache = [];
 
 export async function initGastos() {
   if (els.fecha && !els.fecha.value) {
@@ -62,13 +66,25 @@ async function cargarCategorias() {
   }
 }
 
+function ordenarCuentas(cuentas) {
+  // Coloca primero los bancos canónicos esperados y luego el resto.
+  const indice = new Map(BANCOS_ESPERADOS.map((nombre, idx) => [nombre, idx]));
+  return [...cuentas].sort((a, b) => {
+    const ia = indice.has(a.nombre) ? indice.get(a.nombre) : 999;
+    const ib = indice.has(b.nombre) ? indice.get(b.nombre) : 999;
+    if (ia !== ib) return ia - ib;
+    return a.nombre.localeCompare(b.nombre);
+  });
+}
+
 async function cargarCuentas() {
   if (!els.cuenta) return;
   try {
     const cuentas = await get("/cuentas/");
+    cuentasCache = ordenarCuentas(cuentas);
     els.cuenta.innerHTML =
       `<option value="">Sin afectar banco</option>` +
-      cuentas
+      cuentasCache
         .map(
           (c) => `<option value="${c.id}">${c.nombre} (${c.moneda})</option>`,
         )

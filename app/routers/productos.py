@@ -7,7 +7,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Producto, Receta
+from app.models import (
+    DetallePedido,
+    MovimientoInventario,
+    Producto,
+    Receta,
+)
 from app.schemas import (
     ProductoCreate,
     ProductoOut,
@@ -83,18 +88,53 @@ def actualizar(producto_id: int, data: ProductoUpdate, db: Session = Depends(get
         raise HTTPException(status_code=500, detail=f"Error actualizando producto: {exc}") from exc
 
 
-@router.delete("/{producto_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{producto_id}", status_code=status.HTTP_200_OK)
 def eliminar(producto_id: int, db: Session = Depends(get_db)):
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     try:
-        producto.activo = False
+        tiene_pedidos = (
+            db.query(DetallePedido)
+            .filter(DetallePedido.producto_id == producto_id)
+            .first()
+            is not None
+        )
+        tiene_movimientos = (
+            db.query(MovimientoInventario)
+            .filter(MovimientoInventario.producto_id == producto_id)
+            .first()
+            is not None
+        )
+        usado_en_receta = (
+            db.query(Receta)
+            .filter(Receta.ingrediente_id == producto_id)
+            .first()
+            is not None
+        )
+
+        if tiene_pedidos or tiene_movimientos or usado_en_receta:
+            producto.activo = False
+            db.commit()
+            return {
+                "id": producto.id,
+                "borrado": False,
+                "inactivado": True,
+                "mensaje": "El producto tiene historial; se marcó como inactivo.",
+            }
+
+        db.query(Receta).filter(Receta.producto_id == producto_id).delete()
+        db.delete(producto)
         db.commit()
+        return {
+            "id": producto_id,
+            "borrado": True,
+            "inactivado": False,
+            "mensaje": "Producto eliminado.",
+        }
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error eliminando producto: {exc}") from exc
-    return None
 
 
 # ---------------------------------------------------------------------------

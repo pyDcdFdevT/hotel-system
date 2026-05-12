@@ -34,12 +34,13 @@ def today() -> date:
 class TasaCambio(Base):
     __tablename__ = "tasas_cambio"
     __table_args__ = (
-        UniqueConstraint("fecha", name="uq_tasa_fecha"),
+        UniqueConstraint("fecha", "tipo", name="uq_tasa_fecha_tipo"),
         CheckConstraint("usd_a_ves > 0", name="ck_tasa_positiva"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     fecha = Column(Date, default=today, nullable=False, index=True)
+    tipo = Column(String(20), default="bcv", nullable=False, index=True)
     usd_a_ves = Column(Numeric(12, 4), nullable=False)
     created_at = Column(DateTime, default=utc_now, nullable=False)
 
