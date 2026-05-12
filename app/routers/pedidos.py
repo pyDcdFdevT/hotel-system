@@ -16,13 +16,17 @@ from app.models import (
     Pedido,
     Producto,
     Reserva,
+    Usuario,
+    caracas_now,
     utc_now,
 )
-from app.routers.auth import require_roles
+from app.routers.auth import get_current_user, require_roles
 from app.schemas import (
     CocinaEstadoUpdate,
+    PedidoAnular,
     PedidoCargoHabitacion,
     PedidoCreate,
+    PedidoItemsUpdate,
     PedidoOut,
     PedidoPago,
 )
@@ -254,6 +258,7 @@ def crear_pedido(data: PedidoCreate, db: Session = Depends(get_db)):
 
         pedido.total_bs = total_bs
         pedido.total_usd = total_usd
+        pedido.ultima_actividad = caracas_now()
         db.commit()
         return _cargar_pedido(db, pedido.id)
     except HTTPException:
@@ -321,6 +326,7 @@ def agregar_items(pedido_id: int, data: PedidoCreate, db: Session = Depends(get_
         pedido.total_bs = total_bs
         pedido.total_usd = total_usd
         pedido.updated_at = utc_now()
+        pedido.ultima_actividad = caracas_now()
         if data.notas:
             existentes = (pedido.notas or "").strip()
             pedido.notas = f"{existentes} | {data.notas}".strip(" |") if existentes else data.notas
@@ -541,3 +547,218 @@ def cancelar(pedido_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error cancelando pedido: {exc}") from exc
     return None
+
+
+# ---------------------------------------------------------------------------
+# Edición de items (cuenta aparcada) y aparcar
+# ---------------------------------------------------------------------------
+@router.put(
+    "/{pedido_id}/items",
+    response_model=PedidoOut,
+    dependencies=[Depends(require_roles("admin", "mesero"))],
+)
+def actualizar_items(
+    pedido_id: int,
+    data: PedidoItemsUpdate,
+    db: Session = Depends(get_db),
+):
+    """Reemplaza la lista de ítems del pedido (sólo si está abierto).
+
+    Devuelve stock por los ítems eliminados y descuenta por los nuevos. Las
+    cantidades que se mantienen se ajustan por diferencia.
+    """
+    pedido = _cargar_pedido(db, pedido_id)
+    if pedido.estado != "abierto":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sólo se pueden editar pedidos abiertos (actual: {pedido.estado})",
+        )
+
+    try:
+        # Mapeo del estado actual: producto_id → cantidad actual.
+        actuales: dict[int, Decimal] = {}
+        for det in pedido.detalles or []:
+            actuales[det.producto_id] = Decimal(det.cantidad or 0)
+
+        nuevos: dict[int, Decimal] = {}
+        for item in data.items or []:
+            cant = Decimal(item.cantidad)
+            if cant <= 0:
+                continue
+            nuevos[item.producto_id] = nuevos.get(item.producto_id, Decimal("0")) + cant
+
+        # 1) Productos eliminados: devolver TODO su stock.
+        for prod_id, cant in actuales.items():
+            if prod_id not in nuevos and cant > 0:
+                try:
+                    restaurar_inventario_por_receta(
+                        db,
+                        producto_id=prod_id,
+                        cantidad=cant,
+                        motivo=f"Edición pedido #{pedido.id} (quitado)",
+                        referencia=f"pedido:{pedido.id}",
+                    )
+                except ValueError:
+                    continue
+
+        # 2) Ajuste de cantidades (suma o resta diferencia).
+        for prod_id, cant_nueva in nuevos.items():
+            cant_actual = actuales.get(prod_id, Decimal("0"))
+            delta = cant_nueva - cant_actual
+            if delta > 0:
+                descontar_inventario_por_receta(
+                    db,
+                    producto_id=prod_id,
+                    cantidad=delta,
+                    motivo=f"Edición pedido #{pedido.id} (incrementado)",
+                    referencia=f"pedido:{pedido.id}",
+                )
+            elif delta < 0:
+                restaurar_inventario_por_receta(
+                    db,
+                    producto_id=prod_id,
+                    cantidad=-delta,
+                    motivo=f"Edición pedido #{pedido.id} (decrementado)",
+                    referencia=f"pedido:{pedido.id}",
+                )
+
+        # 3) Borrar detalles antiguos y reconstruir.
+        for det in list(pedido.detalles or []):
+            db.delete(det)
+        db.flush()
+
+        total_bs = Decimal("0")
+        total_usd = Decimal("0")
+        for prod_id, cant in nuevos.items():
+            producto = db.query(Producto).filter(Producto.id == prod_id).first()
+            if not producto:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Producto {prod_id} no existe",
+                )
+            precio_bs = Decimal(producto.precio_bs or 0)
+            precio_usd = Decimal(producto.precio_usd or 0)
+            subtotal_bs = (precio_bs * cant).quantize(Decimal("0.01"))
+            subtotal_usd = (precio_usd * cant).quantize(Decimal("0.01"))
+            db.add(
+                DetallePedido(
+                    pedido_id=pedido.id,
+                    producto_id=prod_id,
+                    cantidad=cant,
+                    precio_unit_bs=precio_bs,
+                    precio_unit_usd=precio_usd,
+                    subtotal_bs=subtotal_bs,
+                    subtotal_usd=subtotal_usd,
+                )
+            )
+            total_bs += subtotal_bs
+            total_usd += subtotal_usd
+
+        pedido.total_bs = total_bs
+        pedido.total_usd = total_usd
+        pedido.updated_at = utc_now()
+        pedido.ultima_actividad = caracas_now()
+        if data.notas is not None:
+            pedido.notas = data.notas or None
+
+        db.commit()
+        db.expire_all()
+        return _cargar_pedido(db, pedido.id)
+    except HTTPException:
+        db.rollback()
+        raise
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error editando ítems: {exc}") from exc
+
+
+@router.post(
+    "/{pedido_id}/aparcar",
+    response_model=PedidoOut,
+    dependencies=[Depends(require_roles("admin", "mesero"))],
+)
+def aparcar_pedido(pedido_id: int, db: Session = Depends(get_db)):
+    """Aparca (guarda sin cobrar) una cuenta abierta.
+
+    No cambia el estado del pedido (sigue ``abierto``); sólo registra la última
+    actividad para que aparezca en la lista de "Cuentas pendientes".
+    """
+    pedido = _cargar_pedido(db, pedido_id)
+    if pedido.estado != "abierto":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sólo se pueden aparcar pedidos abiertos (actual: {pedido.estado})",
+        )
+    try:
+        pedido.ultima_actividad = caracas_now()
+        pedido.updated_at = utc_now()
+        db.commit()
+        return _cargar_pedido(db, pedido.id)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error aparcando pedido: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Anular venta pagada (sólo admin)
+# ---------------------------------------------------------------------------
+@router.post("/{pedido_id}/anular")
+def anular_venta(
+    pedido_id: int,
+    body: PedidoAnular,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(require_roles("admin")),
+):
+    """Anula una venta ya pagada. Restaura stock y registra el motivo.
+
+    El pedido pasa a estado ``anulado`` y ``anulado=True``. Los reportes que
+    filtran por ``estado in ("pagado", "cargado")`` lo excluyen automáticamente.
+    Si el pedido estaba cargado a una habitación con consumos, no se elimina
+    el consumo (sólo se anula la venta para reportes).
+    """
+    pedido = _cargar_pedido(db, pedido_id)
+    if pedido.estado not in {"pagado", "cargado"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sólo se pueden anular ventas pagadas (estado actual: {pedido.estado})",
+        )
+    if pedido.anulado:
+        raise HTTPException(status_code=400, detail="La venta ya fue anulada anteriormente")
+    try:
+        for detalle in pedido.detalles or []:
+            try:
+                restaurar_inventario_por_receta(
+                    db,
+                    producto_id=detalle.producto_id,
+                    cantidad=Decimal(detalle.cantidad or 0),
+                    motivo=f"Anulación venta #{pedido.id}: {body.motivo}",
+                    referencia=f"pedido:{pedido.id}",
+                )
+            except ValueError:
+                continue
+        ahora = caracas_now()
+        pedido.estado = "anulado"
+        pedido.anulado = True
+        pedido.anulado_motivo = body.motivo
+        pedido.anulado_por = usuario.nombre
+        pedido.anulado_en = ahora
+        pedido.updated_at = utc_now()
+        pedido.ultima_actividad = ahora
+        db.commit()
+        return {
+            "success": True,
+            "pedido_id": pedido.id,
+            "estado": pedido.estado,
+            "anulado_por": pedido.anulado_por,
+            "anulado_en": pedido.anulado_en.isoformat() if pedido.anulado_en else None,
+            "motivo": pedido.anulado_motivo,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error anulando venta: {exc}") from exc

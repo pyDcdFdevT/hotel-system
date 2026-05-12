@@ -167,6 +167,13 @@ class Reserva(Base):
     pagado_parcial_usd = Column(Numeric(10, 2), default=0, nullable=False)
     pagado_parcial_bs = Column(Numeric(12, 2), default=0, nullable=False)
     estado_pago = Column(String(20), default="pendiente", nullable=False, index=True)
+    # Cancelación de reserva (con reembolso opcional).
+    cancelada = Column(Boolean, default=False, nullable=False)
+    cancelada_motivo = Column(String(200), nullable=True)
+    cancelada_en = Column(DateTime, nullable=True)
+    reembolso_porcentaje = Column(Integer, default=0, nullable=False)
+    reembolso_monto_usd = Column(Numeric(10, 2), default=0, nullable=False)
+    reembolso_monto_bs = Column(Numeric(12, 2), default=0, nullable=False)
     # Timestamps en hora local Venezuela (America/Caracas).
     created_at = Column(DateTime, default=caracas_now, nullable=False)
     updated_at = Column(DateTime, default=caracas_now, onupdate=caracas_now, nullable=False)
@@ -277,6 +284,14 @@ class Pedido(Base):
     metodo_pago = Column(String(30))
     cuenta_banco_id = Column(Integer, ForeignKey("cuentas_banco.id"))
     notas = Column(String(255))
+    # Anulación de venta pagada (solo admin). Estado se vuelve "anulado".
+    anulado = Column(Boolean, default=False, nullable=False)
+    anulado_motivo = Column(String(200), nullable=True)
+    anulado_por = Column(String(100), nullable=True)
+    anulado_en = Column(DateTime, nullable=True)
+    # Marca la última vez que se modificó la cuenta abierta (útil para la
+    # vista de cuentas pendientes en POS).
+    ultima_actividad = Column(DateTime, default=caracas_now, nullable=False)
     created_at = Column(DateTime, default=caracas_now, nullable=False)
     updated_at = Column(DateTime, default=caracas_now, onupdate=caracas_now, nullable=False)
 

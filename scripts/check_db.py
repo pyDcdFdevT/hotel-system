@@ -247,7 +247,7 @@ def _migrar_estados_habitaciones(engine) -> None:
 
 
 def _migrar_pedidos_habitacion(engine) -> None:
-    """Añade columna ``habitacion_numero`` y ``estado_cocina`` a ``pedidos``."""
+    """Añade columnas a ``pedidos`` (habitación, cocina, anulación, actividad)."""
     if not _is_sqlite(engine):
         return
     from sqlalchemy import text
@@ -260,6 +260,28 @@ def _migrar_pedidos_habitacion(engine) -> None:
             return
         info = conn.execute(text("PRAGMA table_info(pedidos)")).fetchall()
         columnas = {row[1] for row in info}
+        # Columnas para anulación de ventas pagadas y "última actividad".
+        anulacion = (
+            ("anulado", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("anulado_motivo", "VARCHAR(200)"),
+            ("anulado_por", "VARCHAR(100)"),
+            ("anulado_en", "DATETIME"),
+            ("ultima_actividad", "DATETIME"),
+        )
+        for nombre, tipo in anulacion:
+            if nombre not in columnas:
+                print(f"[check_db] Migrando pedidos: añadiendo columna '{nombre}'…")
+                conn.execute(
+                    text(f"ALTER TABLE pedidos ADD COLUMN {nombre} {tipo}")
+                )
+                columnas.add(nombre)
+        # Inicializar ``ultima_actividad`` para filas existentes (si quedó NULL).
+        conn.execute(
+            text(
+                "UPDATE pedidos SET ultima_actividad = COALESCE(updated_at, fecha) "
+                "WHERE ultima_actividad IS NULL"
+            )
+        )
         if "habitacion_numero" not in columnas:
             print("[check_db] Migrando pedidos: añadiendo columna 'habitacion_numero'…")
             conn.execute(
@@ -325,6 +347,12 @@ def _migrar_reservas_vehiculo(engine) -> None:
             ("pais_origen", "VARCHAR(100)"),
             ("tipo_documento", "VARCHAR(20)"),
             ("numero_documento", "VARCHAR(50)"),
+            ("cancelada", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("cancelada_motivo", "VARCHAR(200)"),
+            ("cancelada_en", "DATETIME"),
+            ("reembolso_porcentaje", "INTEGER NOT NULL DEFAULT 0"),
+            ("reembolso_monto_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
+            ("reembolso_monto_bs", "NUMERIC(12, 2) NOT NULL DEFAULT 0"),
         )
         for nombre, tipo in nuevos:
             if nombre not in columnas:

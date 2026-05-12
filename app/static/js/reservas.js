@@ -105,12 +105,24 @@ export async function loadReservas() {
           ? `${r.tipo_documento || ""} ${r.numero_documento}`.trim()
           : r.documento || "-";
         const habNumero = habitacionNumero(r.habitacion_id);
-        const acciones =
-          r.estado === "reservada"
-            ? `<button data-id="${r.id}" data-hab="${r.habitacion_id}" class="btn-checkin-resv px-3 py-1 rounded bg-blue-600 text-white text-xs">Check-in</button>`
-            : r.estado === "activa"
-              ? `<span class="text-xs text-slate-500">Hacer check-out desde Habitaciones</span>`
-              : "";
+        const acciones = [];
+        if (r.estado === "reservada") {
+          acciones.push(
+            `<button data-id="${r.id}" data-hab="${r.habitacion_id}" class="btn-checkin-resv px-3 py-1 rounded bg-blue-600 text-white text-xs">Check-in</button>`,
+          );
+        }
+        if (r.estado === "activa") {
+          acciones.push(
+            `<span class="text-xs text-slate-500">Check-out desde Habitaciones</span>`,
+          );
+        }
+        if (r.estado === "reservada" || r.estado === "activa") {
+          const abonoUsd = Number(r.pagado_parcial_usd || 0);
+          const abonoBs = Number(r.pagado_parcial_bs || 0);
+          acciones.push(
+            `<button data-id="${r.id}" data-abono-usd="${abonoUsd}" data-abono-bs="${abonoBs}" data-huesped="${(r.huesped || "").replace(/"/g, "&quot;")}" class="btn-cancelar-reserva px-3 py-1 rounded bg-red-100 text-red-700 text-xs">🗑️ Cancelar</button>`,
+          );
+        }
         return `
           <tr>
             <td>#${r.id}</td>
@@ -122,7 +134,7 @@ export async function loadReservas() {
             <td>${r.noches}</td>
             <td><span class="estado-pill estado-${r.estado}">${r.estado}</span></td>
             <td>${formatUsd(r.tarifa_usd)}<br><span class="text-xs text-slate-500">${formatBs(r.tarifa_bs)}</span></td>
-            <td>${acciones}</td>
+            <td>${acciones.join(" ")}</td>
           </tr>`;
       })
       .join("");
@@ -133,6 +145,16 @@ export async function loadReservas() {
           checkInDesdeReserva(Number(btn.dataset.id), Number(btn.dataset.hab)),
         ),
       );
+    els.tabla.querySelectorAll(".btn-cancelar-reserva").forEach((btn) =>
+      btn.addEventListener("click", () =>
+        abrirCancelarReserva({
+          id: Number(btn.dataset.id),
+          huesped: btn.dataset.huesped,
+          abonoUsd: Number(btn.dataset.abonoUsd || 0),
+          abonoBs: Number(btn.dataset.abonoBs || 0),
+        }),
+      ),
+    );
   } catch (error) {
     showToast(`Error cargando reservas: ${error.message}`, "error");
   }
@@ -289,4 +311,145 @@ async function checkInDesdeReserva(reservaId, habitacionId) {
 
 async function refrescarTrasCheckin() {
   await Promise.all([cargarHabitacionesDisponibles(), loadReservas()]);
+}
+
+// ---------------------------------------------------------------------------
+// Cancelar reserva con reembolso porcentual
+// ---------------------------------------------------------------------------
+const modalCancel = {
+  fondo: null,
+  form: null,
+  idInput: null,
+  porcentajeInput: null,
+  porcentajeOutput: null,
+  resumen: null,
+  abonoUsd: 0,
+  abonoBs: 0,
+};
+
+function asegurarModalCancelarReserva() {
+  if (modalCancel.fondo) return;
+  modalCancel.fondo = document.getElementById("modal-cancelar-reserva");
+  if (!modalCancel.fondo) {
+    // Si el HTML aún no fue insertado, lo creamos dinámicamente.
+    const div = document.createElement("div");
+    div.id = "modal-cancelar-reserva";
+    div.className = "modal-backdrop hidden";
+    div.innerHTML = `
+      <form id="form-cancelar-reserva" class="card p-5 w-full max-w-md space-y-3">
+        <h3 class="text-lg font-semibold text-red-700">🗑️ Cancelar reserva</h3>
+        <input type="hidden" id="cancelar-reserva-id" />
+        <p class="text-sm text-slate-600" id="cancelar-reserva-resumen"></p>
+        <div>
+          <label class="text-xs uppercase text-slate-500">% Reembolso (0–100)</label>
+          <div class="flex items-center gap-2">
+            <input type="range" min="0" max="100" step="5" value="0" id="cancelar-reserva-porcentaje" class="flex-1" />
+            <span id="cancelar-reserva-porcentaje-val" class="text-sm font-semibold w-12 text-right">0%</span>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs uppercase text-slate-500">Método de reembolso</label>
+          <select name="metodo_pago_reembolso" class="w-full border rounded px-2 py-1">
+            <option value="">— No aplica —</option>
+            <option value="efectivo">Efectivo</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="pagomovil">Pago Móvil</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs uppercase text-slate-500">Nota (opcional)</label>
+          <textarea name="nota" rows="2" class="w-full border rounded px-2 py-1"
+            placeholder="Motivo o detalles del reembolso"></textarea>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" id="cancelar-reserva-cerrar" class="px-3 py-1 border rounded">Volver</button>
+          <button type="submit" class="px-3 py-1 bg-red-600 text-white rounded">Confirmar cancelación</button>
+        </div>
+      </form>
+    `;
+    document.body.appendChild(div);
+    modalCancel.fondo = div;
+  }
+  modalCancel.form = document.getElementById("form-cancelar-reserva");
+  modalCancel.idInput = document.getElementById("cancelar-reserva-id");
+  modalCancel.porcentajeInput = document.getElementById(
+    "cancelar-reserva-porcentaje",
+  );
+  modalCancel.porcentajeOutput = document.getElementById(
+    "cancelar-reserva-porcentaje-val",
+  );
+  modalCancel.resumen = document.getElementById("cancelar-reserva-resumen");
+
+  document.getElementById("cancelar-reserva-cerrar")?.addEventListener(
+    "click",
+    () => modalCancel.fondo.classList.add("hidden"),
+  );
+  modalCancel.porcentajeInput?.addEventListener("input", actualizarResumenCancel);
+  modalCancel.form?.addEventListener("submit", confirmarCancelarReserva);
+}
+
+function actualizarResumenCancel() {
+  const pct = Number(modalCancel.porcentajeInput?.value || 0);
+  if (modalCancel.porcentajeOutput) {
+    modalCancel.porcentajeOutput.textContent = `${pct}%`;
+  }
+  if (modalCancel.resumen) {
+    const reembUsd = (modalCancel.abonoUsd * pct) / 100;
+    const reembBs = (modalCancel.abonoBs * pct) / 100;
+    modalCancel.resumen.innerHTML = `
+      <strong>Pago anticipado:</strong> ${formatUsd(modalCancel.abonoUsd)} / ${formatBs(modalCancel.abonoBs)}<br>
+      <strong>Reembolso (${pct}%):</strong> ${formatUsd(reembUsd)} / ${formatBs(reembBs)}
+    `;
+  }
+}
+
+function abrirCancelarReserva({ id, huesped, abonoUsd, abonoBs }) {
+  asegurarModalCancelarReserva();
+  if (!modalCancel.fondo) return;
+  if (modalCancel.idInput) modalCancel.idInput.value = String(id);
+  modalCancel.abonoUsd = Number(abonoUsd || 0);
+  modalCancel.abonoBs = Number(abonoBs || 0);
+  if (modalCancel.porcentajeInput) modalCancel.porcentajeInput.value = "0";
+  if (modalCancel.form) {
+    const tituloHuesped = (huesped || "huésped").replace(/<[^>]+>/g, "");
+    const ph = modalCancel.form.querySelector('textarea[name="nota"]');
+    if (ph) ph.value = "";
+    modalCancel.form
+      .querySelector('select[name="metodo_pago_reembolso"]')
+      ?.setAttribute("data-huesped", tituloHuesped);
+  }
+  actualizarResumenCancel();
+  modalCancel.fondo.classList.remove("hidden");
+}
+
+async function confirmarCancelarReserva(event) {
+  event.preventDefault();
+  if (!modalCancel.form || !modalCancel.idInput) return;
+  const id = Number(modalCancel.idInput.value);
+  if (!id) return;
+  const fd = new FormData(modalCancel.form);
+  const porcentaje = Math.max(
+    0,
+    Math.min(100, Number(modalCancel.porcentajeInput?.value || 0)),
+  );
+  const payload = {
+    porcentaje_reembolso: porcentaje,
+    nota: fd.get("nota")?.toString() || null,
+    metodo_pago_reembolso:
+      fd.get("metodo_pago_reembolso")?.toString() || null,
+  };
+  try {
+    const resp = await post(`/reservas/${id}/cancelar`, payload);
+    modalCancel.fondo?.classList.add("hidden");
+    const reemb = Number(resp.reembolso_usd || 0);
+    const reembBs = Number(resp.reembolso_bs || 0);
+    let msg = `Reserva #${id} cancelada`;
+    if (reemb > 0 || reembBs > 0) {
+      msg += ` · Reembolso ${formatUsd(reemb)} / ${formatBs(reembBs)} (${porcentaje}%)`;
+    }
+    showToast(msg, "success");
+    await Promise.all([cargarHabitacionesDisponibles(), loadReservas()]);
+  } catch (error) {
+    showToast(`Error cancelando reserva: ${error.message}`, "error");
+  }
 }

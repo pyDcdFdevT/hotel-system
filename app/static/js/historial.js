@@ -1,9 +1,11 @@
 import {
   get,
+  post,
   formatBs,
   formatUsd,
   formatFechaHoraVe,
   showToast,
+  getUsuario,
 } from "./api.js";
 
 // -----------------------------------------------------------------------------
@@ -164,15 +166,21 @@ function renderMetodos(data) {
     : `<li class="text-slate-500 text-xs">Sin pagos registrados en el período.</li>`;
 }
 
+function esAdmin() {
+  const u = getUsuario();
+  return u && u.rol === "admin";
+}
+
 function renderTabla(data) {
   const tbody = $("hist-tabla-tx");
   if (!tbody) return;
   state.total = data.total || 0;
   if (!data.items?.length) {
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">Sin transacciones en este período.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">Sin transacciones en este período.</div></td></tr>`;
     setText("hist-paginacion-info", "0 de 0");
     return;
   }
+  const admin = esAdmin();
   tbody.innerHTML = data.items
     .map((tx) => {
       const fecha = tx.fecha ? formatFechaHoraVe(tx.fecha) : "-";
@@ -180,6 +188,11 @@ function renderTabla(data) {
         etiqueta: tx.tipo || "venta",
         clase: "badge-info",
       };
+      // Sólo permitimos anular pedidos pagados/cargados; los check-outs no.
+      const puedeAnular = admin && tx.tipo !== "checkout";
+      const accion = puedeAnular
+        ? `<button data-id="${tx.id}" data-concepto="${(tx.concepto || "").replace(/"/g, "&quot;")}" class="btn-anular-venta px-2 py-0.5 text-xs rounded bg-red-100 text-red-700">Anular</button>`
+        : "";
       return `
         <tr>
           <td class="text-xs whitespace-nowrap">${fecha}</td>
@@ -188,16 +201,49 @@ function renderTabla(data) {
           <td class="text-right">${formatUsd(tx.monto_usd)}</td>
           <td class="text-right">${formatBs(tx.monto_bs)}</td>
           <td class="text-xs text-slate-500">${tx.usuario_nombre || "-"}</td>
+          <td class="text-right">${accion}</td>
         </tr>
       `;
     })
     .join("");
+  tbody.querySelectorAll(".btn-anular-venta").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      anularVenta(Number(btn.dataset.id), btn.dataset.concepto || ""),
+    ),
+  );
   const desde_idx = state.offset + 1;
   const hasta_idx = Math.min(state.offset + data.items.length, state.total);
   setText(
     "hist-paginacion-info",
     `${desde_idx}–${hasta_idx} de ${state.total}`,
   );
+}
+
+async function anularVenta(pedidoId, concepto) {
+  const motivo = window.prompt(
+    `Indique el motivo de la anulación de "${concepto || `Pedido #${pedidoId}`}"`,
+    "",
+  );
+  if (motivo === null) return;
+  const trim = motivo.trim();
+  if (trim.length < 2) {
+    showToast("Debe indicar un motivo válido", "error");
+    return;
+  }
+  if (
+    !confirm(
+      "¿Anular esta venta? Se devolverá el stock al inventario y no se podrá deshacer.",
+    )
+  ) {
+    return;
+  }
+  try {
+    await post(`/pedidos/${pedidoId}/anular`, { motivo: trim });
+    showToast(`Venta #${pedidoId} anulada`, "success");
+    recargar();
+  } catch (error) {
+    showToast(`Error anulando venta: ${error.message}`, "error");
+  }
 }
 
 function actualizarBotonesRango() {

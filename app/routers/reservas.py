@@ -10,12 +10,21 @@ from app.database import get_db
 from app.models import (
     CuentaBanco,
     Habitacion,
+    LogAcceso,
     MovimientoCuenta,
     Reserva,
+    Usuario,
+    caracas_now,
     today,
     utc_now,
 )
-from app.schemas import ReservaCheckout, ReservaCreate, ReservaOut
+from app.routers.auth import require_roles
+from app.schemas import (
+    CancelarReservaRequest,
+    ReservaCheckout,
+    ReservaCreate,
+    ReservaOut,
+)
 from app.services.tasa_service import obtener_tasa_dia
 
 
@@ -263,3 +272,91 @@ def checkout(reserva_id: int, data: ReservaCheckout, db: Session = Depends(get_d
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error realizando checkout: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Cancelación de reserva (admin / recepción) con reembolso porcentual
+# ---------------------------------------------------------------------------
+@router.post("/{reserva_id}/cancelar")
+def cancelar_reserva(
+    reserva_id: int,
+    body: CancelarReservaRequest,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(require_roles("admin", "recepcion")),
+):
+    """Cancela una reserva (en estado ``reservada`` o ``activa``).
+
+    Si hay pago anticipado, se aplica un reembolso porcentual sobre lo abonado
+    y se registran los montos. La habitación queda ``disponible``.
+    """
+    reserva = db.query(Reserva).filter(Reserva.id == reserva_id).first()
+    if not reserva:
+        raise HTTPException(status_code=404, detail="Reserva no encontrada")
+    if reserva.estado not in {"reservada", "activa"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede cancelar una reserva en estado '{reserva.estado}'",
+        )
+
+    try:
+        porcentaje = max(0, min(100, int(body.porcentaje_reembolso)))
+        factor = Decimal(porcentaje) / Decimal(100)
+        abonado_usd = Decimal(reserva.pagado_parcial_usd or 0)
+        abonado_bs = Decimal(reserva.pagado_parcial_bs or 0)
+        reembolso_usd = (abonado_usd * factor).quantize(Decimal("0.01"))
+        reembolso_bs = (abonado_bs * factor).quantize(Decimal("0.01"))
+
+        ahora = caracas_now()
+        reserva.estado = "cancelada"
+        reserva.cancelada = True
+        reserva.cancelada_motivo = body.nota or None
+        reserva.cancelada_en = ahora
+        reserva.reembolso_porcentaje = porcentaje
+        reserva.reembolso_monto_usd = reembolso_usd
+        reserva.reembolso_monto_bs = reembolso_bs
+        if body.metodo_pago_reembolso:
+            reserva.metodo_pago = body.metodo_pago_reembolso
+        reserva.updated_at = ahora
+
+        habitacion = (
+            db.query(Habitacion).filter(Habitacion.id == reserva.habitacion_id).first()
+        )
+        if habitacion and habitacion.estado in {"reservada", "ocupada"}:
+            habitacion.estado = "disponible"
+            habitacion.updated_at = ahora
+
+        db.add(
+            LogAcceso(
+                usuario_id=usuario.id,
+                usuario_nombre=usuario.nombre,
+                accion="cancelar_reserva",
+                detalle=(
+                    f"Reserva #{reserva.id} cancelada. Reembolso {porcentaje}% "
+                    f"= {reembolso_usd} USD / {reembolso_bs} Bs. "
+                    f"Nota: {body.nota or '-'}"
+                ),
+                exitoso=True,
+            )
+        )
+
+        db.commit()
+        return {
+            "success": True,
+            "reserva_id": reserva.id,
+            "habitacion_id": reserva.habitacion_id,
+            "estado": reserva.estado,
+            "porcentaje_reembolso": porcentaje,
+            "reembolso_usd": float(reembolso_usd),
+            "reembolso_bs": float(reembolso_bs),
+            "cancelada_por": usuario.nombre,
+            "cancelada_en": ahora.isoformat(),
+            "nota": body.nota,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500, detail=f"Error cancelando reserva: {exc}"
+        ) from exc

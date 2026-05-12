@@ -13,13 +13,19 @@ from app.database import get_db
 from app.models import (
     ESTADOS_HABITACION,
     Habitacion,
+    LogAcceso,
     Pedido,
     Reserva,
+    Usuario,
     caracas_now,
     today,
 )
+from app.routers.auth import require_roles
+from app.routers.pedidos import _cancelar_pedido_interno
 from app.services.tasa_service import obtener_tasa_bcv, obtener_tasa_dia
 from app.schemas import (
+    CancelarCheckinRequest,
+    EditarHuespedRequest,
     HabitacionCheckinRequest,
     HabitacionCheckoutPreview,
     HabitacionCheckoutRequest,
@@ -706,3 +712,139 @@ def eliminar(habitacion_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error eliminando habitaci?n: {exc}") from exc
     return None
+
+
+# ---------------------------------------------------------------------------
+# Cancelaci?n de check-in (admin)
+# ---------------------------------------------------------------------------
+@router.post("/{habitacion_id}/cancelar-checkin")
+def cancelar_checkin(
+    habitacion_id: int,
+    body: CancelarCheckinRequest,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(require_roles("admin")),
+):
+    """Cancela un check-in en curso (rol admin).
+
+    Si ``eliminar_consumos`` est? activo, todos los pedidos abiertos asociados
+    a la habitaci?n se cancelan (devolviendo stock). En caso contrario quedan
+    abiertos para cobrarse de forma independiente.
+
+    En ambos casos la reserva pasa a ``cancelada`` y la habitaci?n queda
+    ``disponible``. Se deja registro en ``LogAcceso`` con el motivo.
+    """
+    habitacion = _cargar_habitacion(db, habitacion_id)
+    if habitacion.estado != "ocupada":
+        raise HTTPException(
+            status_code=400,
+            detail=f"La habitaci?n no est? ocupada (estado: {habitacion.estado})",
+        )
+    reserva = _reserva_activa(db, habitacion_id)
+    if not reserva:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay reserva activa asociada para cancelar",
+        )
+
+    try:
+        ahora = caracas_now()
+        pedidos_abiertos = (
+            db.query(Pedido)
+            .filter(Pedido.habitacion_numero == habitacion.numero)
+            .filter(Pedido.estado == "abierto")
+            .all()
+        )
+        consumos_cancelados = 0
+        if body.eliminar_consumos:
+            for ped in pedidos_abiertos:
+                _cancelar_pedido_interno(db, ped.id)
+                consumos_cancelados += 1
+
+        # Reserva ? cancelada (no cerrada, para distinguir reportes).
+        reserva.estado = "cancelada"
+        reserva.cancelada = True
+        reserva.cancelada_motivo = body.motivo
+        reserva.cancelada_en = ahora
+        reserva.updated_at = ahora
+
+        habitacion.estado = "disponible"
+        habitacion.updated_at = ahora
+
+        db.add(
+            LogAcceso(
+                usuario_id=usuario.id,
+                usuario_nombre=usuario.nombre,
+                accion="cancelar_checkin",
+                detalle=(
+                    f"Reserva #{reserva.id} hab. {habitacion.numero}. "
+                    f"Consumos {'eliminados' if body.eliminar_consumos else 'preservados'}. "
+                    f"Motivo: {body.motivo}"
+                ),
+                exitoso=True,
+            )
+        )
+
+        db.commit()
+        return {
+            "success": True,
+            "reserva_id": reserva.id,
+            "habitacion_id": habitacion.id,
+            "consumos_cancelados": consumos_cancelados,
+            "consumos_abiertos_restantes": (
+                0 if body.eliminar_consumos else len(pedidos_abiertos)
+            ),
+            "motivo": body.motivo,
+            "cancelada_por": usuario.nombre,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error cancelando check-in: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Editar datos del hu?sped (admin / recepci?n)
+# ---------------------------------------------------------------------------
+@router.put(
+    "/{habitacion_id}/huesped",
+    response_model=ReservaOut,
+    dependencies=[Depends(require_roles("admin", "recepcion"))],
+)
+def editar_huesped(
+    habitacion_id: int,
+    data: EditarHuespedRequest,
+    db: Session = Depends(get_db),
+):
+    """Edita los datos del hu?sped tras el check-in (s?lo si la hab est? ocupada)."""
+    habitacion = _cargar_habitacion(db, habitacion_id)
+    if habitacion.estado != "ocupada":
+        raise HTTPException(
+            status_code=400,
+            detail="S?lo se puede editar el hu?sped si la habitaci?n est? ocupada",
+        )
+    reserva = _reserva_activa(db, habitacion_id)
+    if not reserva:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay reserva activa asociada para editar",
+        )
+
+    try:
+        payload = data.model_dump(exclude_unset=True)
+        # S?lo aplicamos cambios reales (no sobrescribimos con None).
+        for campo, valor in payload.items():
+            if valor is None or valor == "":
+                continue
+            setattr(reserva, campo, valor)
+        reserva.updated_at = caracas_now()
+        db.commit()
+        db.refresh(reserva)
+        return reserva
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error editando hu?sped: {exc}") from exc

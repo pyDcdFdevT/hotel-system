@@ -448,6 +448,113 @@
           </div>
         </form>
       </div>
+
+      <!-- Modal Editar Huésped -->
+      <div id="modal-editar-huesped" class="modal-backdrop hidden">
+        <form id="form-editar-huesped" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold" id="editar-huesped-titulo">Editar huésped</h3>
+          <input type="hidden" id="editar-huesped-habitacion-id" name="habitacion_id" />
+          <div>
+            <label class="text-xs uppercase text-slate-500">Nombre completo</label>
+            <input name="huesped" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <fieldset class="border rounded p-3 space-y-2">
+            <legend class="text-sm font-medium text-slate-700 px-1">📋 Documento</legend>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs uppercase text-slate-500">País</label>
+                <input name="pais_origen" class="w-full border rounded px-2 py-1" placeholder="Venezuela" />
+              </div>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Tipo</label>
+                <div class="flex gap-3 text-sm pt-1.5">
+                  <label class="flex items-center gap-1">
+                    <input type="radio" name="tipo_documento" value="N" /> N
+                  </label>
+                  <label class="flex items-center gap-1">
+                    <input type="radio" name="tipo_documento" value="E" /> E
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Número de documento</label>
+              <input name="numero_documento" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Teléfono</label>
+              <input name="telefono" class="w-full border rounded px-2 py-1" />
+            </div>
+          </fieldset>
+          <fieldset class="border rounded p-3 space-y-2">
+            <legend class="text-sm font-medium text-slate-700 px-1">🚗 Vehículo</legend>
+            <div class="grid grid-cols-3 gap-2">
+              <input name="vehiculo_modelo" placeholder="Modelo" class="border rounded px-2 py-1" />
+              <input name="vehiculo_color" placeholder="Color" class="border rounded px-2 py-1" />
+              <input name="vehiculo_placa" placeholder="Placa" class="border rounded px-2 py-1" />
+            </div>
+          </fieldset>
+          <fieldset class="border rounded p-3 space-y-2">
+            <legend class="text-sm font-medium text-slate-700 px-1">📅 Fechas y horas</legend>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs uppercase text-slate-500">Fecha ingreso</label>
+                <input type="date" name="fecha_checkin" class="w-full border rounded px-2 py-1" />
+              </div>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Hora ingreso</label>
+                <input type="time" name="hora_ingreso" class="w-full border rounded px-2 py-1" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs uppercase text-slate-500">Fecha salida est.</label>
+                <input type="date" name="fecha_checkout_estimado" class="w-full border rounded px-2 py-1" />
+              </div>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Hora salida est.</label>
+                <input type="time" name="hora_salida" class="w-full border rounded px-2 py-1" />
+              </div>
+            </div>
+          </fieldset>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="editar-huesped-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Guardar cambios</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Modal Cancelar Check-in -->
+      <div id="modal-cancelar-checkin" class="modal-backdrop hidden">
+        <form id="form-cancelar-checkin" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold text-red-700">🚫 Cancelar check-in</h3>
+          <input type="hidden" id="cancelar-checkin-habitacion-id" />
+          <p class="text-sm text-slate-600">
+            Esta acción liberará la habitación y marcará la reserva como
+            cancelada. Sólo administradores pueden realizarla.
+          </p>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Motivo *</label>
+            <textarea name="motivo" required rows="2"
+              placeholder="Ej: error de captura, cliente no se presentó..."
+              class="w-full border rounded px-2 py-1"></textarea>
+          </div>
+          <div class="flex flex-col gap-2 text-sm">
+            <label class="flex items-center gap-2">
+              <input type="radio" name="eliminar_consumos" value="0" checked />
+              Conservar consumos (quedan como cuentas abiertas para cobrarse)
+            </label>
+            <label class="flex items-center gap-2">
+              <input type="radio" name="eliminar_consumos" value="1" />
+              Eliminar consumos (devuelve stock e invalida los pedidos)
+            </label>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="cancelar-checkin-cerrar" class="px-3 py-1 border rounded">Volver</button>
+            <button type="submit" class="px-3 py-1 bg-red-600 text-white rounded">Cancelar check-in</button>
+          </div>
+        </form>
+      </div>
     </section>
 
     <!-- Reservas -->
@@ -648,38 +755,38 @@
           </div>
         </div>
 
-        <!-- ============ Columna derecha: carrito y mesas ============ -->
+        <!-- ============ Columna central: cuentas pendientes ============ -->
         <div class="space-y-4">
-          <!-- Banner del estado de la cuenta activa -->
-          <div id="pos-banner" class="pos-banner pos-banner-inactive">
-            <span id="pos-banner-text">⚫ Ninguna cuenta activa. Crea una mesa o cuenta para comenzar.</span>
-            <button id="pos-btn-cancelar-cuenta" type="button" class="pos-banner-cancel hidden">
-              🗑️ Cancelar cuenta
-            </button>
-          </div>
-
           <div class="pos-section">
             <div class="flex items-center justify-between mb-2">
-              <h2 class="text-lg font-semibold">Mesas activas</h2>
-              <div class="flex gap-2">
-                <button id="pos-btn-nueva-mesa" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">
-                  ➕ Nueva mesa
-                </button>
-                <button id="pos-btn-nueva-habitacion" type="button" class="px-3 py-1.5 bg-amber-600 text-white rounded text-sm">
-                  🏨 Por habitación
-                </button>
-              </div>
+              <h2 class="text-lg font-semibold">📋 Cuentas pendientes</h2>
+              <span id="pos-cuentas-count" class="text-xs text-slate-500"></span>
             </div>
-            <div id="pos-mesas-chips" class="flex flex-wrap gap-2"></div>
+            <div class="flex flex-col gap-2 mb-3">
+              <button id="pos-btn-nueva-mesa" type="button" class="w-full px-3 py-2 bg-blue-600 text-white rounded text-sm font-medium">
+                ➕ Nueva mesa
+              </button>
+              <button id="pos-btn-nueva-habitacion" type="button" class="w-full px-3 py-2 bg-amber-600 text-white rounded text-sm font-medium">
+                🏨 Por habitación
+              </button>
+            </div>
+            <div id="pos-cuentas-lista" class="pos-cuentas-lista flex flex-col gap-2"></div>
+          </div>
+        </div>
+
+        <!-- ============ Columna derecha: cuenta activa ============ -->
+        <div class="space-y-4">
+          <div id="pos-banner" class="pos-banner pos-banner-inactive">
+            <span id="pos-banner-text">⚫ Ninguna cuenta activa. Crea una mesa o cuenta para comenzar.</span>
           </div>
 
           <div class="pos-section">
             <div class="flex items-center justify-between mb-2">
               <div>
-                <h2 class="text-lg font-semibold">Pedido actual</h2>
-                <p class="text-xs text-slate-500" id="pos-pedido-titulo">Sin mesa seleccionada</p>
+                <h2 class="text-lg font-semibold" id="pos-pedido-titulo">Sin cuenta activa</h2>
+                <p class="text-xs text-slate-500" id="pos-pedido-info"></p>
               </div>
-              <button id="pos-btn-vaciar" class="text-xs text-red-600">Vaciar carrito</button>
+              <button id="pos-btn-vaciar" type="button" class="text-xs text-red-600">Vaciar carrito</button>
             </div>
             <div class="overflow-x-auto">
               <table>
@@ -701,12 +808,18 @@
               <p class="text-xs text-slate-500" id="pos-tasa">Tasa día: --</p>
             </div>
 
-            <div class="pos-cart-actions mt-4">
-              <button id="pos-btn-cobrar" class="btn-pos btn-cobrar" disabled>CERRAR Y COBRAR</button>
-              <button id="pos-btn-nuevo" class="btn-pos btn-nuevo">NUEVO PEDIDO</button>
+            <div class="pos-cart-actions mt-4 grid grid-cols-3 gap-2">
+              <button id="pos-btn-aparcar" type="button" class="btn-pos bg-slate-200 text-slate-800" disabled>
+                💾 Aparcar
+              </button>
+              <button id="pos-btn-cobrar" type="button" class="btn-pos btn-cobrar" disabled>
+                💰 Cobrar
+              </button>
+              <button id="pos-btn-cancelar-cuenta" type="button" class="btn-pos bg-red-100 text-red-700 hidden">
+                🗑️ Cancelar
+              </button>
             </div>
             <div class="mt-2 text-xs text-slate-500">
-              <p id="pos-pedido-info"></p>
               <p id="pos-hora-actual"></p>
             </div>
           </div>
@@ -1185,6 +1298,7 @@
                 <th class="text-right">USD</th>
                 <th class="text-right">Bs</th>
                 <th>Usuario</th>
+                <th class="text-right">Acciones</th>
               </tr>
             </thead>
             <tbody id="hist-tabla-tx"></tbody>

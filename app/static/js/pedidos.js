@@ -1,6 +1,7 @@
 import {
   get,
   post,
+  put,
   del as deleteApi,
   showToast,
   formatBs,
@@ -11,7 +12,7 @@ import {
 } from "./api.js";
 import { getCacheTasas, refreshHeaderTasas } from "./config.js";
 
-const STORAGE_KEY = "hotel-pos-state-v1";
+const STORAGE_KEY = "hotel-pos-state-v2";
 
 const CATEGORIAS_ORDEN = [
   "Piscina",
@@ -37,7 +38,7 @@ const state = {
   mesaTipo: "restaurante",
   habitacionNumero: null,
   reservaId: null,
-  mesasActivas: [],
+  cuentasPendientes: [],
   habitaciones: [],
   tasas: { bcv: 405.35, paralelo: 415.0 },
   tasaTipo: "bcv",
@@ -47,10 +48,12 @@ const els = {
   busqueda: document.getElementById("pos-busqueda"),
   favoritos: document.getElementById("pos-favoritos"),
   categorias: document.getElementById("pos-categorias"),
-  mesasChips: document.getElementById("pos-mesas-chips"),
+  cuentasLista: document.getElementById("pos-cuentas-lista"),
+  cuentasCount: document.getElementById("pos-cuentas-count"),
   btnNuevaMesa: document.getElementById("pos-btn-nueva-mesa"),
   btnNuevaHabitacion: document.getElementById("pos-btn-nueva-habitacion"),
   btnCancelarCuenta: document.getElementById("pos-btn-cancelar-cuenta"),
+  btnAparcar: document.getElementById("pos-btn-aparcar"),
   banner: document.getElementById("pos-banner"),
   bannerText: document.getElementById("pos-banner-text"),
   btnRefrescarFavs: document.getElementById("pos-btn-refrescar-favs"),
@@ -63,7 +66,6 @@ const els = {
   tasa: document.getElementById("pos-tasa"),
   btnVaciar: document.getElementById("pos-btn-vaciar"),
   btnCobrar: document.getElementById("pos-btn-cobrar"),
-  btnNuevo: document.getElementById("pos-btn-nuevo"),
   modalNuevaMesa: document.getElementById("modal-nueva-mesa"),
   formNuevaMesa: document.getElementById("form-nueva-mesa"),
   nuevaMesaCancelar: document.getElementById("nueva-mesa-cancelar"),
@@ -83,6 +85,7 @@ const els = {
   pagoTasaInfo: document.getElementById("pago-tasa-info"),
 };
 
+let cuentasRefreshTimer = null;
 let favRefreshTimer = null;
 let horaTimer = null;
 
@@ -96,12 +99,12 @@ export async function initPedidos() {
     );
   if (els.btnCancelarCuenta)
     els.btnCancelarCuenta.addEventListener("click", cancelarCuentaActiva);
+  if (els.btnAparcar) els.btnAparcar.addEventListener("click", aparcarCuenta);
   if (els.nuevaMesaCancelar)
     els.nuevaMesaCancelar.addEventListener("click", cerrarNuevaMesa);
   if (els.formNuevaMesa) els.formNuevaMesa.addEventListener("submit", crearNuevaMesa);
   if (els.btnRefrescarFavs) els.btnRefrescarFavs.addEventListener("click", cargarFavoritos);
   if (els.btnVaciar) els.btnVaciar.addEventListener("click", vaciarCarrito);
-  if (els.btnNuevo) els.btnNuevo.addEventListener("click", nuevoPedido);
   if (els.btnCobrar) els.btnCobrar.addEventListener("click", abrirModalPago);
   if (els.pagoCancelar) els.pagoCancelar.addEventListener("click", cerrarModalPago);
   if (els.formPago) els.formPago.addEventListener("submit", confirmarPago);
@@ -129,12 +132,15 @@ export async function initPedidos() {
     cargarFavoritos(),
     cargarReservasActivas(),
     cargarCuentas(),
-    cargarMesasActivas(),
+    cargarCuentasPendientes(),
     cargarHabitaciones(),
   ]);
 
   if (favRefreshTimer) clearInterval(favRefreshTimer);
-  favRefreshTimer = setInterval(cargarFavoritos, 5 * 60 * 1000); // cada 5 min
+  favRefreshTimer = setInterval(cargarFavoritos, 5 * 60 * 1000);
+
+  if (cuentasRefreshTimer) clearInterval(cuentasRefreshTimer);
+  cuentasRefreshTimer = setInterval(cargarCuentasPendientes, 30 * 1000);
 
   if (horaTimer) clearInterval(horaTimer);
   actualizarHora();
@@ -305,37 +311,53 @@ function productoButtonHtml(p, esFavorito) {
 }
 
 // --------------------------------------------------------------------------
-// Mesas activas
+// Cuentas pendientes (panel izquierdo)
 // --------------------------------------------------------------------------
-async function cargarMesasActivas() {
-  if (!els.mesasChips) return;
+async function cargarCuentasPendientes() {
+  if (!els.cuentasLista) return;
   try {
-    state.mesasActivas = await get("/pedidos/activos");
-    renderMesasChips();
+    state.cuentasPendientes = await get("/pedidos/activos");
+    renderCuentasPendientes();
   } catch (error) {
-    showToast(`Error cargando mesas: ${error.message}`, "error");
+    showToast(`Error cargando cuentas: ${error.message}`, "error");
   }
 }
 
-function renderMesasChips() {
-  if (!els.mesasChips) return;
-  if (!state.mesasActivas.length) {
-    els.mesasChips.innerHTML = `<p class="empty-state text-xs">Sin mesas activas. Crea una con "+ Nueva mesa".</p>`;
+function renderCuentasPendientes() {
+  if (!els.cuentasLista) return;
+  const cuentas = state.cuentasPendientes || [];
+  if (els.cuentasCount) {
+    els.cuentasCount.textContent = cuentas.length
+      ? `${cuentas.length} abierta${cuentas.length === 1 ? "" : "s"}`
+      : "";
+  }
+  if (!cuentas.length) {
+    els.cuentasLista.innerHTML = `<p class="empty-state text-xs">Sin cuentas abiertas. Crea una mesa o cuenta para empezar.</p>`;
     return;
   }
-  els.mesasChips.innerHTML = state.mesasActivas
+  els.cuentasLista.innerHTML = cuentas
     .map((p) => {
       const activo = state.pedidoActivo?.id === p.id;
-      const label = p.mesa ? p.mesa : `Pedido #${p.id}`;
+      const etiqueta = p.mesa
+        ? p.mesa
+        : p.habitacion_numero
+          ? `🏨 Hab ${p.habitacion_numero}`
+          : `Pedido #${p.id}`;
+      const ultima = p.ultima_actividad || p.fecha;
+      const hora = ultima ? formatTimeVE(ultima) : "";
+      const icono = activo ? "🟢" : "⚪";
       return `
-        <button data-id="${p.id}" class="pos-mesa-chip ${activo ? "active" : ""}">
-          <span>${label}</span>
-          <span class="pos-mesa-total">${formatUsd(p.total_usd)}</span>
+        <button data-id="${p.id}" type="button" class="pos-cuenta-card ${activo ? "active" : ""}">
+          <div class="pos-cuenta-info">
+            <strong>${icono} ${etiqueta}</strong>
+            <span class="pos-cuenta-meta">#${p.id} · ${hora || ""}</span>
+          </div>
+          <span class="pos-cuenta-total">${formatUsd(p.total_usd)}</span>
         </button>
       `;
     })
     .join("");
-  els.mesasChips.querySelectorAll(".pos-mesa-chip").forEach((btn) =>
+  els.cuentasLista.querySelectorAll(".pos-cuenta-card").forEach((btn) =>
     btn.addEventListener("click", () => seleccionarMesa(Number(btn.dataset.id))),
   );
 }
@@ -361,7 +383,7 @@ async function cancelarCuentaActiva() {
   const etiqueta =
     state.mesaActiva ||
     (state.pedidoActivo ? `Pedido #${state.pedidoActivo.id}` : "esta cuenta");
-  if (!confirm(`¿Cancelar ${etiqueta} sin cobrar? Esta acción no se puede deshacer.`)) {
+  if (!confirm(`¿Cancelar ${etiqueta} sin cobrar? Se devolverá el stock y no se puede deshacer.`)) {
     return;
   }
   try {
@@ -376,7 +398,36 @@ async function cancelarCuentaActiva() {
     return;
   }
   resetearEstadoCuenta();
-  await Promise.all([cargarMesasActivas(), cargarProductos()]);
+  await Promise.all([cargarCuentasPendientes(), cargarProductos()]);
+}
+
+async function aparcarCuenta() {
+  if (!state.pedidoActivo && state.carrito.size === 0 && !state.mesaActiva) {
+    showToast("No hay nada para aparcar", "info");
+    return;
+  }
+  try {
+    // Si todavía no hay pedido en servidor, lo creamos primero con los items
+    // que estén en el carrito local.
+    if (!state.pedidoActivo?.id) {
+      if (state.carrito.size === 0) {
+        showToast("Añade productos antes de aparcar la cuenta", "info");
+        return;
+      }
+      await asegurarPedidoActivo();
+    } else if (state.carrito.size > 0) {
+      // Hay nuevos items locales: los enviamos antes de aparcar.
+      await asegurarPedidoActivo();
+    }
+    if (state.pedidoActivo?.id) {
+      await post(`/pedidos/${state.pedidoActivo.id}/aparcar`, {});
+      showToast(`Cuenta #${state.pedidoActivo.id} aparcada`, "info");
+    }
+    resetearEstadoCuenta();
+    await cargarCuentasPendientes();
+  } catch (error) {
+    showToast(`Error aparcando: ${error.message}`, "error");
+  }
 }
 
 function resetearEstadoCuenta() {
@@ -425,6 +476,7 @@ async function crearNuevaMesa(event) {
   const mesa = formData.get("mesa")?.toString().trim() || null;
   const habitacion = formData.get("habitacion_numero")?.toString().trim() || null;
 
+  // IMPORTANTE: NO borrar otras cuentas. Sólo abrir una nueva en estado local.
   if (modo === "habitacion") {
     if (!habitacion) {
       showToast("Indique el número de habitación", "error");
@@ -464,6 +516,10 @@ async function crearNuevaMesa(event) {
 
 async function seleccionarMesa(pedidoId) {
   try {
+    // Si hay un carrito local sin guardar, lo aparcamos antes de cambiar.
+    if (state.pedidoActivo?.id && state.carrito.size > 0) {
+      await asegurarPedidoActivo();
+    }
     const pedido = await get(`/pedidos/${pedidoId}`);
     state.pedidoActivo = pedido;
     state.mesaActiva =
@@ -475,7 +531,7 @@ async function seleccionarMesa(pedidoId) {
     state.carrito.clear();
     refrescarUI();
   } catch (error) {
-    showToast(`Error cargando mesa: ${error.message}`, "error");
+    showToast(`Error cargando cuenta: ${error.message}`, "error");
   }
 }
 
@@ -485,15 +541,14 @@ async function seleccionarMesa(pedidoId) {
 function agregarAlCarrito(productoId) {
   const producto = state.productos.find((p) => p.id === productoId);
   if (!producto) return;
-  if (!state.mesaActiva && !state.pedidoActivo) {
-    // Auto-crear una "mesa rápida" para no obligar al modal en cada venta.
-    state.mesaActiva = "Barra";
-    state.mesaTipo = "general";
+  if (!hayCuentaActiva()) {
+    showToast("Primero crea una nueva mesa o selecciona una cuenta pendiente", "info");
+    return;
   }
   const actual = state.carrito.get(productoId) || { producto, cantidad: 0 };
   actual.cantidad += 1;
   state.carrito.set(productoId, actual);
-  enviarItems(productoId);
+  refrescarUI();
 }
 
 function cambiarCantidad(productoId, delta) {
@@ -502,11 +557,8 @@ function cambiarCantidad(productoId, delta) {
   item.cantidad += delta;
   if (item.cantidad <= 0) {
     state.carrito.delete(productoId);
-    refrescarUI();
-    return;
   }
-  if (delta > 0) enviarItems(productoId);
-  else refrescarUI();
+  refrescarUI();
 }
 
 function quitarDelCarrito(productoId) {
@@ -517,11 +569,6 @@ function quitarDelCarrito(productoId) {
 function vaciarCarrito() {
   state.carrito.clear();
   refrescarUI();
-}
-
-function nuevoPedido() {
-  resetearEstadoCuenta();
-  showToast("Listo para nuevo pedido", "info");
 }
 
 function totalesCarrito() {
@@ -535,7 +582,7 @@ function totalesCarrito() {
 }
 
 function refrescarUI() {
-  renderMesasChips();
+  renderCuentasPendientes();
   renderCarrito();
   renderPedidoInfo();
   persistirLocal();
@@ -544,33 +591,31 @@ function refrescarUI() {
 function renderPedidoInfo() {
   if (!els.pedidoTitulo) return;
   const mesa = state.mesaActiva || (state.pedidoActivo?.mesa ?? "—");
-  const tipoTxt = state.mesaTipo || "—";
-  els.pedidoTitulo.textContent = state.pedidoActivo
-    ? `Mesa: ${mesa} · ${tipoTxt} · #${state.pedidoActivo.id}`
-    : state.mesaActiva
-      ? `Mesa: ${mesa} · ${tipoTxt} (nueva)`
-      : "Sin mesa seleccionada";
+  els.pedidoTitulo.textContent = hayCuentaActiva()
+    ? `🟢 Cuenta activa: ${mesa}`
+    : "⚫ Sin cuenta activa";
   if (els.pedidoInfo) {
     if (state.pedidoActivo) {
       const fecha = state.pedidoActivo.fecha;
       els.pedidoInfo.textContent = fecha
-        ? `Abierta a las ${formatTimeVE(fecha)} · Total registrado ${formatUsd(state.pedidoActivo.total_usd)}`
-        : "";
+        ? `Pedido #${state.pedidoActivo.id} · Abierta a las ${formatTimeVE(fecha)}`
+        : `Pedido #${state.pedidoActivo.id}`;
+    } else if (state.mesaActiva) {
+      els.pedidoInfo.textContent = "Cuenta nueva (aún sin guardar)";
     } else {
       els.pedidoInfo.textContent = "";
     }
   }
-  if (els.btnCobrar) {
-    const totales = totalesCarrito();
-    const totalGuardado = Number(state.pedidoActivo?.total_usd || 0);
-    const hayProductos =
-      state.carrito.size > 0 ||
-      totales.totalUsd > 0 ||
-      totalGuardado > 0 ||
-      (state.pedidoActivo?.detalles?.length ?? 0) > 0;
-    const cuenta = hayCuentaActiva();
-    els.btnCobrar.disabled = !(cuenta && hayProductos);
-  }
+  const totales = totalesCarrito();
+  const totalGuardado = Number(state.pedidoActivo?.total_usd || 0);
+  const hayProductos =
+    state.carrito.size > 0 ||
+    totales.totalUsd > 0 ||
+    totalGuardado > 0 ||
+    (state.pedidoActivo?.detalles?.length ?? 0) > 0;
+  const cuenta = hayCuentaActiva();
+  if (els.btnCobrar) els.btnCobrar.disabled = !(cuenta && hayProductos);
+  if (els.btnAparcar) els.btnAparcar.disabled = !(cuenta && hayProductos);
   actualizarBannerCuenta();
 }
 
@@ -583,8 +628,8 @@ function actualizarBannerCuenta() {
         ? `Hab ${state.habitacionNumero}`
         : `Pedido #${state.pedidoActivo?.id}`);
     const desde = state.pedidoActivo?.fecha
-      ? ` (desde ${formatTimeVE(state.pedidoActivo.fecha)})`
-      : " (sin guardar)";
+      ? ` · abierta ${formatTimeVE(state.pedidoActivo.fecha)}`
+      : " · sin guardar";
     els.bannerText.textContent = `🟢 Cuenta activa: ${etiqueta}${desde}`;
     els.banner.classList.remove("pos-banner-inactive");
     els.banner.classList.add("pos-banner-active");
@@ -600,7 +645,6 @@ function actualizarBannerCuenta() {
 
 function renderCarrito() {
   if (!els.carrito) return;
-  // Combinamos detalles del pedido (servidor) + items locales pendientes.
   const filasServidor = [];
   if (state.pedidoActivo?.detalles?.length) {
     for (const d of state.pedidoActivo.detalles) {
@@ -671,16 +715,9 @@ function renderCarrito() {
 // --------------------------------------------------------------------------
 // Persistencia servidor (auto-save de items)
 // --------------------------------------------------------------------------
-async function enviarItems(_productoIdAgregado) {
-  // Estrategia: solo flush al servidor cuando explícitamente lo pedimos.
-  // Por ahora solo refrescamos UI (los items locales se mandarán al crear/agregar).
-  refrescarUI();
-}
-
 async function asegurarPedidoActivo() {
   if (state.pedidoActivo?.id) {
     if (state.carrito.size > 0) {
-      // Mandar los items pendientes al pedido existente.
       const payload = {
         tipo: state.pedidoActivo.tipo || state.mesaTipo,
         items: Array.from(state.carrito.values()).map((item) => ({
@@ -698,7 +735,6 @@ async function asegurarPedidoActivo() {
     return state.pedidoActivo;
   }
 
-  // Crear pedido nuevo.
   if (!state.carrito.size) {
     throw new Error("Añade productos al carrito antes de cobrar");
   }
@@ -755,7 +791,7 @@ async function cargarCuentas() {
 }
 
 // --------------------------------------------------------------------------
-// Modal de pago (CERRAR Y COBRAR)
+// Modal de pago (Cobrar)
 // --------------------------------------------------------------------------
 async function abrirModalPago() {
   try {
@@ -778,7 +814,7 @@ async function abrirModalPago() {
   actualizarInfoTasa();
   els.modalPago?.classList.remove("hidden");
   refrescarUI();
-  await cargarMesasActivas();
+  await cargarCuentasPendientes();
 }
 
 function cerrarModalPago() {
@@ -811,7 +847,11 @@ async function confirmarPago(event) {
     showToast(mensaje, "success");
     cerrarModalPago();
     resetearEstadoCuenta();
-    await Promise.all([cargarProductos(), cargarMesasActivas(), cargarFavoritos()]);
+    await Promise.all([
+      cargarProductos(),
+      cargarCuentasPendientes(),
+      cargarFavoritos(),
+    ]);
   } catch (error) {
     showToast(`Error en pago: ${error.message}`, "error");
   }
@@ -848,7 +888,6 @@ function restaurarLocal() {
     state.mesaTipo = snap.mesaTipo || "restaurante";
     state.habitacionNumero = snap.habitacionNumero || null;
     state.reservaId = snap.reservaId || null;
-    // El carrito local se reconstruye cuando lleguen los productos.
     state._pendiente = snap.carrito || [];
     state._pendientePedidoId = snap.pedidoActivoId || null;
   } catch (_err) {
@@ -864,3 +903,7 @@ function reconstruirCarritoPendiente() {
   }
   state._pendiente = [];
 }
+
+// Exportado para que `put` no se reporte como import sin uso si el compilador
+// es estricto; lo usaremos en el endpoint de items cuando se requiera.
+export { put };

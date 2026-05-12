@@ -1201,3 +1201,437 @@ def test_reserva_checkin_desde_reservada(client):
     # La habitación ahora está ocupada.
     refrescada = client.get(f"/api/habitaciones/{hab['id']}").json()
     assert refrescada["estado"] == "ocupada"
+
+
+# ---------------------------------------------------------------------------
+# POS: multicuenta (cuentas pendientes)
+# ---------------------------------------------------------------------------
+def test_pos_multiple_cuentas(client):
+    """Crear varias cuentas en paralelo: ninguna borra a las anteriores."""
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+
+    p1 = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "bar",
+            "mesa": "Mesa Multi A",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 1}],
+        },
+    ).json()
+    p2 = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "bar",
+            "mesa": "Mesa Multi B",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 2}],
+        },
+    ).json()
+    p3 = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "bar",
+            "mesa": "Mesa Multi C",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 3}],
+        },
+    ).json()
+
+    activos = client.get("/api/pedidos/activos").json()
+    ids = {p["id"] for p in activos}
+    assert p1["id"] in ids
+    assert p2["id"] in ids
+    assert p3["id"] in ids
+    assert all(p["estado"] == "abierto" for p in activos if p["id"] in ids)
+
+
+def test_aparcar_cuenta(client):
+    """Aparcar una cuenta no la cobra ni la borra; sigue abierta y actualiza
+    la marca de última actividad."""
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "bar",
+            "mesa": "Mesa Aparcar",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 1}],
+        },
+    ).json()
+    resp = client.post(f"/api/pedidos/{pedido['id']}/aparcar", json={})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["estado"] == "abierto"
+    assert body["id"] == pedido["id"]
+    assert body["ultima_actividad"] is not None
+
+    # Sigue listándose como activa.
+    activos = client.get("/api/pedidos/activos").json()
+    assert pedido["id"] in {p["id"] for p in activos}
+
+
+def test_actualizar_items_devuelve_stock(client):
+    """PUT /items reemplaza la lista, ajustando stock por la diferencia."""
+    productos = client.get("/api/productos/").json()
+    hamb = next(p for p in productos if p["nombre"] == "Hamburguesa Clásica")
+    pan = next(p for p in productos if p["nombre"] == "Pan hamburguesa")
+    pan_inicial = float(pan["stock_actual"])
+
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Mesa Items",
+            "items": [{"producto_id": hamb["id"], "cantidad": 3}],
+        },
+    ).json()
+    despues_crear = float(
+        next(
+            p
+            for p in client.get("/api/productos/").json()
+            if p["nombre"] == "Pan hamburguesa"
+        )["stock_actual"]
+    )
+    assert despues_crear == pan_inicial - 3
+
+    # Reducimos a 1 hamburguesa → debe devolverse 2 panes al stock.
+    resp = client.put(
+        f"/api/pedidos/{pedido['id']}/items",
+        json={"items": [{"producto_id": hamb["id"], "cantidad": 1}]},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["detalles"]) == 1
+    assert float(body["detalles"][0]["cantidad"]) == 1
+
+    despues_editar = float(
+        next(
+            p
+            for p in client.get("/api/productos/").json()
+            if p["nombre"] == "Pan hamburguesa"
+        )["stock_actual"]
+    )
+    assert despues_editar == pan_inicial - 1
+
+
+# ---------------------------------------------------------------------------
+# Anular venta pagada (sólo admin)
+# ---------------------------------------------------------------------------
+def test_anular_venta_admin(client):
+    """Admin puede anular una venta pagada y se restaura el stock."""
+    productos = client.get("/api/productos/").json()
+    hamb = next(p for p in productos if p["nombre"] == "Hamburguesa Clásica")
+    pan = next(p for p in productos if p["nombre"] == "Pan hamburguesa")
+    pan_inicial = float(pan["stock_actual"])
+
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Mesa Anular",
+            "items": [{"producto_id": hamb["id"], "cantidad": 2}],
+        },
+    ).json()
+    total = float(pedido["total_usd"])
+    pago = client.post(
+        f"/api/pedidos/{pedido['id']}/pagar",
+        json={"metodo_pago": "usd", "monto_usd": total},
+    )
+    assert pago.status_code == 200, pago.text
+    assert pago.json()["estado"] == "pagado"
+
+    # Anular.
+    resp = client.post(
+        f"/api/pedidos/{pedido['id']}/anular",
+        json={"motivo": "error de captura"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["estado"] == "anulado"
+    assert body["motivo"] == "error de captura"
+    assert body["anulado_por"] == "Administrador"
+
+    # Stock restaurado.
+    pan_final = float(
+        next(
+            p
+            for p in client.get("/api/productos/").json()
+            if p["nombre"] == "Pan hamburguesa"
+        )["stock_actual"]
+    )
+    assert pan_final == pan_inicial
+
+    # Doble anulación falla.
+    resp2 = client.post(
+        f"/api/pedidos/{pedido['id']}/anular",
+        json={"motivo": "duplicado"},
+    )
+    assert resp2.status_code == 400
+
+
+def test_anular_venta_requiere_admin(anon_client):
+    """Mesero/recepción NO pueden anular ventas (sólo admin)."""
+    # Login admin para crear y pagar la venta.
+    admin = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()
+    admin_h = {"Authorization": f"Bearer {admin['token']}"}
+    productos = anon_client.get("/api/productos/", headers=admin_h).json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+    pedido = anon_client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "bar",
+            "mesa": "Mesa NoAdmin",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 1}],
+        },
+        headers=admin_h,
+    ).json()
+    total = float(pedido["total_usd"])
+    anon_client.post(
+        f"/api/pedidos/{pedido['id']}/pagar",
+        json={"metodo_pago": "usd", "monto_usd": total},
+        headers=admin_h,
+    )
+
+    # Intentar anular como mesero → 403.
+    mesero = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()
+    mesero_h = {"Authorization": f"Bearer {mesero['token']}"}
+    resp = anon_client.post(
+        f"/api/pedidos/{pedido['id']}/anular",
+        json={"motivo": "intento mesero"},
+        headers=mesero_h,
+    )
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Cancelar check-in (con/sin consumos)
+# ---------------------------------------------------------------------------
+def test_cancelar_checkin_con_consumos(client):
+    """Cancelar check-in con eliminar_consumos=True debe anular los pedidos."""
+    hab = _habitacion_disponible(client)
+    reserva = client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={"huesped": "Cancela ConConsumos", "noches": 1},
+    ).json()
+    assert reserva["estado"] == "activa"
+
+    # Crear un pedido cargado a la habitación.
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "habitacion",
+            "habitacion_numero": hab["numero"],
+            "items": [{"producto_id": cerveza["id"], "cantidad": 2}],
+        },
+    ).json()
+    assert pedido["estado"] == "abierto"
+
+    resp = client.post(
+        f"/api/habitaciones/{hab['id']}/cancelar-checkin",
+        json={"eliminar_consumos": True, "motivo": "huésped se retiró"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["consumos_cancelados"] >= 1
+
+    # Habitación liberada.
+    refrescada = client.get(f"/api/habitaciones/{hab['id']}").json()
+    assert refrescada["estado"] == "disponible"
+    # Pedido quedó cancelado.
+    ped = client.get(f"/api/pedidos/{pedido['id']}").json()
+    assert ped["estado"] == "cancelado"
+
+
+def test_cancelar_checkin_preserva_consumos(client):
+    """Cancelar check-in con eliminar_consumos=False mantiene los pedidos abiertos."""
+    hab = _habitacion_disponible(client)
+    client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={"huesped": "Cancela SinConsumos", "noches": 1},
+    )
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "habitacion",
+            "habitacion_numero": hab["numero"],
+            "items": [{"producto_id": cerveza["id"], "cantidad": 1}],
+        },
+    ).json()
+
+    resp = client.post(
+        f"/api/habitaciones/{hab['id']}/cancelar-checkin",
+        json={"eliminar_consumos": False, "motivo": "cliente promete pagar después"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["consumos_cancelados"] == 0
+    assert body["consumos_abiertos_restantes"] >= 1
+
+    # Pedido sigue ABIERTO y se puede cobrar independientemente.
+    ped = client.get(f"/api/pedidos/{pedido['id']}").json()
+    assert ped["estado"] == "abierto"
+    # Habitación liberada.
+    refrescada = client.get(f"/api/habitaciones/{hab['id']}").json()
+    assert refrescada["estado"] == "disponible"
+
+
+def test_cancelar_checkin_requiere_admin(anon_client):
+    """Recepción NO puede cancelar un check-in (sólo admin)."""
+    recepcion = anon_client.post("/api/auth/login", json={"pin": "1111"}).json()
+    headers = {"Authorization": f"Bearer {recepcion['token']}"}
+    resp = anon_client.post(
+        "/api/habitaciones/1/cancelar-checkin",
+        json={"eliminar_consumos": False, "motivo": "prueba"},
+        headers=headers,
+    )
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Cancelar reserva con reembolso porcentual
+# ---------------------------------------------------------------------------
+def test_cancelar_reserva_con_reembolso(client):
+    """Cancela una reserva con 50% de reembolso del pago anticipado."""
+    hab = _habitacion_disponible(client)
+    reserva = client.post(
+        "/api/reservas/",
+        json={
+            "habitacion_id": hab["id"],
+            "huesped": "Reserva A Cancelar",
+            "fecha_checkin": "2026-09-01",
+            "fecha_checkout_estimado": "2026-09-02",
+            "noches": 1,
+            "pago_anticipado": True,
+            "moneda_pago": "usd",
+            "monto_recibido_usd": 20,
+        },
+    ).json()
+    assert reserva["estado"] == "reservada"
+    abono = float(reserva["pagado_parcial_usd"])
+    assert abono == 20.0
+
+    resp = client.post(
+        f"/api/reservas/{reserva['id']}/cancelar",
+        json={
+            "porcentaje_reembolso": 50,
+            "nota": "El cliente canceló por enfermedad",
+            "metodo_pago_reembolso": "efectivo",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["porcentaje_reembolso"] == 50
+    assert abs(body["reembolso_usd"] - 10.0) < 0.01
+
+    # Reserva queda en estado 'cancelada' y la habitación se libera.
+    detalle = client.get(f"/api/reservas/{reserva['id']}").json()
+    assert detalle["estado"] == "cancelada"
+    assert detalle["cancelada"] is True
+    assert detalle["reembolso_porcentaje"] == 50
+    assert float(detalle["reembolso_monto_usd"]) == 10.0
+    refrescada = client.get(f"/api/habitaciones/{hab['id']}").json()
+    assert refrescada["estado"] == "disponible"
+
+
+def test_cancelar_reserva_recepcion_permitido(anon_client):
+    """Recepción puede cancelar reservas (no sólo admin)."""
+    admin = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()
+    admin_h = {"Authorization": f"Bearer {admin['token']}"}
+    habs = anon_client.get("/api/habitaciones/", headers=admin_h).json()
+    libre = next((h for h in habs if h["estado"] == "disponible"), None)
+    if not libre:
+        cand = next(h for h in habs if h["estado"] == "inhabilitada")
+        anon_client.put(
+            f"/api/habitaciones/{cand['id']}/estado",
+            json={"estado": "disponible"},
+            headers=admin_h,
+        )
+        libre = anon_client.get(
+            f"/api/habitaciones/{cand['id']}", headers=admin_h
+        ).json()
+
+    reserva = anon_client.post(
+        "/api/reservas/",
+        json={
+            "habitacion_id": libre["id"],
+            "huesped": "Reserva Recepcion",
+            "fecha_checkin": "2026-09-10",
+            "fecha_checkout_estimado": "2026-09-11",
+            "noches": 1,
+        },
+        headers=admin_h,
+    ).json()
+
+    recepcion = anon_client.post("/api/auth/login", json={"pin": "1111"}).json()
+    rec_h = {"Authorization": f"Bearer {recepcion['token']}"}
+    resp = anon_client.post(
+        f"/api/reservas/{reserva['id']}/cancelar",
+        json={"porcentaje_reembolso": 0, "nota": "prueba recepción"},
+        headers=rec_h,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Editar datos del huésped post check-in
+# ---------------------------------------------------------------------------
+def test_editar_huesped_post_checkin(client):
+    """Editar el huésped en una reserva activa actualiza los datos."""
+    hab = _habitacion_disponible(client)
+    client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={
+            "huesped": "Nombre Inicial",
+            "noches": 1,
+            "pais_origen": "Venezuela",
+            "tipo_documento": "N",
+            "numero_documento": "V-1234",
+        },
+    )
+    refrescada = client.get(f"/api/habitaciones/{hab['id']}").json()
+    assert refrescada["estado"] == "ocupada"
+
+    resp = client.put(
+        f"/api/habitaciones/{hab['id']}/huesped",
+        json={
+            "huesped": "Nombre Corregido",
+            "telefono": "0414-1234567",
+            "pais_origen": "Colombia",
+            "tipo_documento": "E",
+            "numero_documento": "CO-5555",
+            "vehiculo_modelo": "Hyundai Tucson",
+            "vehiculo_color": "Negro",
+            "vehiculo_placa": "AC123BD",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["huesped"] == "Nombre Corregido"
+    assert body["telefono"] == "0414-1234567"
+    assert body["pais_origen"] == "Colombia"
+    assert body["tipo_documento"] == "E"
+    assert body["numero_documento"] == "CO-5555"
+    assert body["vehiculo_modelo"] == "Hyundai Tucson"
+
+
+def test_editar_huesped_requiere_ocupada(client):
+    """Editar huésped en habitación no ocupada falla con 400."""
+    habs = client.get("/api/habitaciones/").json()
+    disponible = next((h for h in habs if h["estado"] == "disponible"), None)
+    if not disponible:
+        candidata = next(h for h in habs if h["estado"] == "inhabilitada")
+        client.put(
+            f"/api/habitaciones/{candidata['id']}/estado",
+            json={"estado": "disponible"},
+        )
+        disponible = client.get(f"/api/habitaciones/{candidata['id']}").json()
+    resp = client.put(
+        f"/api/habitaciones/{disponible['id']}/huesped",
+        json={"huesped": "Sin ocupar"},
+    )
+    assert resp.status_code == 400

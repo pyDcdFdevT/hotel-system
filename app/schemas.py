@@ -242,6 +242,13 @@ class ReservaOut(ORMModel):
     pais_origen: Optional[str] = None
     tipo_documento: Optional[str] = None
     numero_documento: Optional[str] = None
+    cancelada: bool = False
+    cancelada_motivo: Optional[str] = None
+    cancelada_en: Optional[datetime] = None
+    reembolso_porcentaje: int = 0
+    reembolso_monto_usd: Decimal = Decimal("0")
+    reembolso_monto_bs: Decimal = Decimal("0")
+    metodo_pago: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -361,6 +368,23 @@ class PedidoCargoHabitacion(BaseModel):
     reserva_id: int = Field(..., gt=0)
 
 
+class PedidoItemsUpdate(BaseModel):
+    """Reemplaza los detalles de un pedido abierto.
+
+    Si se omite un producto que existía, se devuelve su stock al inventario.
+    Si una cantidad cambia, se ajusta la diferencia.
+    """
+
+    items: List[DetallePedidoIn] = Field(default_factory=list)
+    notas: Optional[str] = None
+
+
+class PedidoAnular(BaseModel):
+    """Anulación de una venta ya pagada (sólo admin)."""
+
+    motivo: str = Field(..., min_length=2, max_length=200)
+
+
 class DetallePedidoOut(ORMModel):
     id: int
     producto_id: int
@@ -390,6 +414,11 @@ class PedidoOut(ORMModel):
     metodo_pago: Optional[str] = None
     cuenta_banco_id: Optional[int] = None
     notas: Optional[str] = None
+    anulado: bool = False
+    anulado_motivo: Optional[str] = None
+    anulado_por: Optional[str] = None
+    anulado_en: Optional[datetime] = None
+    ultima_actividad: Optional[datetime] = None
     detalles: List[DetallePedidoOut] = []
 
 
@@ -689,3 +718,44 @@ class LogAccesoOut(ORMModel):
     ip: Optional[str] = None
     exitoso: bool
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Cancelación de check-in / reserva, edición de huésped
+# ---------------------------------------------------------------------------
+class CancelarCheckinRequest(BaseModel):
+    """Cancela un check-in en curso. Sólo admin.
+
+    Si ``eliminar_consumos`` está activo, los pedidos abiertos asociados a la
+    habitación se cancelan también (devolviendo stock). En caso contrario, los
+    pedidos quedan abiertos para cobrarse después (cuenta independiente).
+    """
+
+    eliminar_consumos: bool = False
+    motivo: str = Field(..., min_length=2, max_length=200)
+
+
+class CancelarReservaRequest(BaseModel):
+    """Cancela una reserva (estado ``reservada`` o ``activa``) con reembolso opcional."""
+
+    porcentaje_reembolso: int = Field(default=0, ge=0, le=100)
+    nota: Optional[str] = Field(default=None, max_length=255)
+    metodo_pago_reembolso: Optional[str] = Field(default=None, max_length=30)
+
+
+class EditarHuespedRequest(BaseModel):
+    """Edita los datos del huésped después del check-in. Sólo admin/recepción."""
+
+    huesped: Optional[str] = Field(default=None, max_length=120)
+    documento: Optional[str] = Field(default=None, max_length=40)
+    telefono: Optional[str] = Field(default=None, max_length=40)
+    pais_origen: Optional[str] = Field(default=None, max_length=100)
+    tipo_documento: Optional[str] = Field(default=None, max_length=20)
+    numero_documento: Optional[str] = Field(default=None, max_length=50)
+    vehiculo_modelo: Optional[str] = Field(default=None, max_length=100)
+    vehiculo_color: Optional[str] = Field(default=None, max_length=50)
+    vehiculo_placa: Optional[str] = Field(default=None, max_length=20)
+    fecha_checkin: Optional[date] = None
+    hora_ingreso: Optional[str] = Field(default=None, max_length=10)
+    fecha_checkout_estimado: Optional[date] = None
+    hora_salida: Optional[str] = Field(default=None, max_length=10)

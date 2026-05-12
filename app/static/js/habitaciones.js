@@ -64,6 +64,19 @@ const els = {
   checkinPagoUsdRow: document.getElementById("checkin-pago-usd-row"),
   checkinPagoBsRow: document.getElementById("checkin-pago-bs-row"),
   checkinSubmit: document.getElementById("checkin-submit"),
+
+  // Editar huésped (post check-in)
+  modalEditarHuesped: document.getElementById("modal-editar-huesped"),
+  formEditarHuesped: document.getElementById("form-editar-huesped"),
+  editarHuespedCancelar: document.getElementById("editar-huesped-cancelar"),
+  editarHuespedTitulo: document.getElementById("editar-huesped-titulo"),
+  editarHuespedHabId: document.getElementById("editar-huesped-habitacion-id"),
+
+  // Cancelar check-in
+  modalCancelarCheckin: document.getElementById("modal-cancelar-checkin"),
+  formCancelarCheckin: document.getElementById("form-cancelar-checkin"),
+  cancelarCheckinCerrar: document.getElementById("cancelar-checkin-cerrar"),
+  cancelarCheckinHabId: document.getElementById("cancelar-checkin-habitacion-id"),
 };
 
 // Mapeo opción → {moneda, metodo} (espejo del backend).
@@ -127,6 +140,15 @@ export async function initHabitaciones() {
   if (els.checkoutHora)
     els.checkoutHora.addEventListener("change", recargarPreviewCheckout);
 
+  if (els.editarHuespedCancelar)
+    els.editarHuespedCancelar.addEventListener("click", cerrarEditarHuesped);
+  if (els.formEditarHuesped)
+    els.formEditarHuesped.addEventListener("submit", confirmarEditarHuesped);
+  if (els.cancelarCheckinCerrar)
+    els.cancelarCheckinCerrar.addEventListener("click", cerrarCancelarCheckin);
+  if (els.formCancelarCheckin)
+    els.formCancelarCheckin.addEventListener("submit", confirmarCancelarCheckin);
+
   await loadHabitaciones();
 }
 
@@ -174,6 +196,8 @@ function botonesPorEstado(h) {
     case "ocupada":
       return `
         <button data-id="${h.id}" class="btn-checkout btn-accion-checkout">Check-out</button>
+        <button data-id="${h.id}" class="btn-editar-huesped btn-accion-editar">✏️ Editar huésped</button>
+        <button data-id="${h.id}" class="btn-cancelar-checkin btn-accion-cancelar-checkin">🚫 Cancelar check-in</button>
       `;
     case "reservada":
       return `
@@ -207,6 +231,16 @@ function enlazarBotones() {
   );
   els.grid.querySelectorAll(".btn-accion-checkout").forEach((btn) =>
     btn.addEventListener("click", () => abrirCheckout(Number(btn.dataset.id))),
+  );
+  els.grid.querySelectorAll(".btn-accion-editar").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      abrirEditarHuesped(Number(btn.dataset.id)),
+    ),
+  );
+  els.grid.querySelectorAll(".btn-accion-cancelar-checkin").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      cancelarCheckinHabitacion(Number(btn.dataset.id)),
+    ),
   );
 }
 
@@ -650,5 +684,150 @@ async function confirmarCheckout(event) {
     await loadHabitaciones();
   } catch (error) {
     showToast(`Error en check-out: ${error.message}`, "error");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Editar huésped (post check-in)
+// ---------------------------------------------------------------------------
+function setFormValue(form, name, value) {
+  if (!form) return;
+  const el = form.querySelector(`[name="${name}"]`);
+  if (!el) return;
+  if (el.type === "radio") {
+    const radio = form.querySelector(`[name="${name}"][value="${value}"]`);
+    if (radio) radio.checked = true;
+  } else if (value != null) {
+    el.value = value;
+  } else {
+    el.value = "";
+  }
+}
+
+async function abrirEditarHuesped(habId) {
+  const h = habitaciones.find((x) => x.id === habId);
+  if (!h) {
+    showToast("Habitación no encontrada", "error");
+    return;
+  }
+  if (h.estado !== "ocupada") {
+    showToast("La habitación no está ocupada", "info");
+    return;
+  }
+  let reserva = null;
+  try {
+    const reservas = await get("/reservas/activas");
+    reserva = (reservas || []).find((r) => r.habitacion_id === habId) || null;
+  } catch (error) {
+    showToast(`No se pudo cargar la reserva: ${error.message}`, "error");
+    return;
+  }
+  if (!reserva) {
+    showToast("No hay reserva activa asociada a la habitación", "error");
+    return;
+  }
+  if (!els.modalEditarHuesped || !els.formEditarHuesped) return;
+  els.formEditarHuesped.reset();
+  if (els.editarHuespedHabId) els.editarHuespedHabId.value = String(habId);
+  if (els.editarHuespedTitulo) {
+    els.editarHuespedTitulo.textContent = `Editar huésped · Hab #${h.numero}`;
+  }
+  const form = els.formEditarHuesped;
+  setFormValue(form, "huesped", reserva.huesped);
+  setFormValue(form, "documento", reserva.documento);
+  setFormValue(form, "telefono", reserva.telefono);
+  setFormValue(form, "pais_origen", reserva.pais_origen);
+  setFormValue(form, "tipo_documento", reserva.tipo_documento || "N");
+  setFormValue(form, "numero_documento", reserva.numero_documento);
+  setFormValue(form, "vehiculo_modelo", reserva.vehiculo_modelo);
+  setFormValue(form, "vehiculo_color", reserva.vehiculo_color);
+  setFormValue(form, "vehiculo_placa", reserva.vehiculo_placa);
+  setFormValue(form, "fecha_checkin", reserva.fecha_checkin);
+  setFormValue(form, "hora_ingreso", reserva.hora_ingreso);
+  setFormValue(form, "fecha_checkout_estimado", reserva.fecha_checkout_estimado);
+  setFormValue(form, "hora_salida", reserva.hora_salida);
+  els.modalEditarHuesped.classList.remove("hidden");
+}
+
+function cerrarEditarHuesped() {
+  els.modalEditarHuesped?.classList.add("hidden");
+}
+
+async function confirmarEditarHuesped(event) {
+  event.preventDefault();
+  if (!els.formEditarHuesped || !els.editarHuespedHabId) return;
+  const habId = Number(els.editarHuespedHabId.value);
+  if (!habId) return;
+  const fd = new FormData(els.formEditarHuesped);
+  const payload = {};
+  for (const [key, value] of fd.entries()) {
+    if (key === "habitacion_id") continue;
+    const txt = value?.toString().trim() ?? "";
+    if (txt) payload[key] = txt;
+  }
+  if (!payload.huesped) {
+    showToast("El nombre es obligatorio", "error");
+    return;
+  }
+  try {
+    await put(`/habitaciones/${habId}/huesped`, payload);
+    showToast("Datos del huésped actualizados", "success");
+    cerrarEditarHuesped();
+    await loadHabitaciones();
+  } catch (error) {
+    showToast(`Error guardando huésped: ${error.message}`, "error");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cancelar check-in (admin)
+// ---------------------------------------------------------------------------
+function cancelarCheckinHabitacion(habId) {
+  const h = habitaciones.find((x) => x.id === habId);
+  if (!h) return;
+  if (h.estado !== "ocupada") {
+    showToast("La habitación no está ocupada", "info");
+    return;
+  }
+  if (!els.modalCancelarCheckin || !els.formCancelarCheckin) return;
+  els.formCancelarCheckin.reset();
+  if (els.cancelarCheckinHabId) els.cancelarCheckinHabId.value = String(habId);
+  els.modalCancelarCheckin.classList.remove("hidden");
+}
+
+function cerrarCancelarCheckin() {
+  els.modalCancelarCheckin?.classList.add("hidden");
+}
+
+async function confirmarCancelarCheckin(event) {
+  event.preventDefault();
+  if (!els.formCancelarCheckin || !els.cancelarCheckinHabId) return;
+  const habId = Number(els.cancelarCheckinHabId.value);
+  if (!habId) return;
+  const fd = new FormData(els.formCancelarCheckin);
+  const motivo = (fd.get("motivo") || "").toString().trim();
+  if (!motivo) {
+    showToast("Indique un motivo", "error");
+    return;
+  }
+  const eliminar = fd.get("eliminar_consumos") === "1";
+  if (eliminar && !confirm(
+    "¿Eliminar TODOS los consumos abiertos? Se devolverá el stock. Esta acción no se puede deshacer.",
+  )) {
+    return;
+  }
+  try {
+    const resp = await post(`/habitaciones/${habId}/cancelar-checkin`, {
+      eliminar_consumos: eliminar,
+      motivo,
+    });
+    showToast(
+      `Check-in cancelado. Consumos ${eliminar ? "eliminados" : "preservados"} (${resp.consumos_cancelados || resp.consumos_abiertos_restantes || 0}).`,
+      "success",
+    );
+    cerrarCancelarCheckin();
+    await loadHabitaciones();
+  } catch (error) {
+    showToast(`Error cancelando check-in: ${error.message}`, "error");
   }
 }
