@@ -31,8 +31,9 @@ const CATEGORIAS_ORDEN = [
 const state = {
   productos: [],
   porCategoria: new Map(),
-  favoritos: [],
-  favoritosIds: new Set(),
+  favoritos: [],         // favoritos REALES del usuario (POST/DELETE)
+  favoritosIds: new Set(), // ids de los favoritos REALES (no incluye fallback)
+  favoritosFallback: [], // sugerencias (top-vendidos) cuando no hay favoritos
   carrito: new Map(),
   pedidoActivo: null,
   mesaActiva: null,
@@ -241,9 +242,15 @@ function indexarPorCategoria() {
 }
 
 /**
- * Carga los favoritos del usuario actual (POST/PUT/DELETE granulares).
- * Si la API devuelve vacío, hace fallback a /productos/favoritos (top
- * vendidos) para que la sección no quede vacía la primera vez.
+ * Carga los favoritos del usuario actual.
+ *
+ * Distingue dos listas:
+ *  - ``state.favoritos`` / ``state.favoritosIds``: los favoritos REALES del
+ *    usuario (los que ha marcado con ⭐). Sólo estos pueden quitarse.
+ *  - ``state.favoritosFallback``: sugerencias (top vendidos) que se muestran
+ *    SÓLO cuando el usuario aún no ha marcado ninguno. No cuentan como
+ *    favoritos reales (no se incluyen en ``favoritosIds``), por lo que el
+ *    catálogo sigue mostrando el botón "＋⭐" para esos productos.
  */
 async function cargarFavoritos() {
   if (!els.favoritos) return;
@@ -252,21 +259,20 @@ async function cargarFavoritos() {
     if (Array.isArray(propios) && propios.length) {
       state.favoritos = propios;
       state.favoritosIds = new Set(propios.map((p) => p.id));
+      state.favoritosFallback = [];
     } else {
-      // Primera vez: caemos a top-vendidos para no mostrar pantalla vacía.
-      const top = await get("/productos/favoritos?limit=10");
-      state.favoritos = Array.isArray(top) ? top : [];
-      state.favoritosIds = new Set(state.favoritos.map((p) => p.id));
+      // Aún no hay favoritos reales: cargamos sugerencias para no dejar la
+      // sección vacía, pero NO las contamos como favoritos del usuario.
+      state.favoritos = [];
+      state.favoritosIds = new Set();
+      try {
+        const top = await get("/productos/favoritos?limit=10");
+        state.favoritosFallback = Array.isArray(top) ? top : [];
+      } catch (_) {
+        state.favoritosFallback = [];
+      }
     }
-    // Persistimos los ids favoritos para uso offline mientras se navega.
-    try {
-      localStorage.setItem(
-        "hotel-pos-favoritos-ids",
-        JSON.stringify([...state.favoritosIds]),
-      );
-    } catch (_) {
-      /* localStorage puede fallar en privado */
-    }
+    persistirFavoritosLocal();
     renderFavoritos();
     renderCatalogo();
   } catch (error) {
@@ -274,56 +280,176 @@ async function cargarFavoritos() {
   }
 }
 
+/**
+ * Guarda los ids de favoritos REALES en ``localStorage`` para que la UI no
+ * "parpadee" al recargar (los botones ⭐ ya salen en estado correcto antes
+ * de que el backend responda).
+ */
+function persistirFavoritosLocal() {
+  try {
+    localStorage.setItem(
+      "hotel-pos-favoritos-ids",
+      JSON.stringify([...state.favoritosIds]),
+    );
+  } catch (_) {
+    /* localStorage puede fallar en modo privado */
+  }
+}
+
 function renderFavoritos() {
   if (!els.favoritos) return;
-  if (!state.favoritos.length) {
-    els.favoritos.innerHTML = `<div class="empty-state">Aún no hay productos favoritos. Marca uno con ⭐ desde el catálogo.</div>`;
+
+  // Caso 1: el usuario tiene favoritos reales → mostrar con botón "✖ quitar".
+  if (state.favoritos.length) {
+    els.favoritos.innerHTML = state.favoritos
+      .map((p) => productoButtonHtml(p, "favorito"))
+      .join("");
+    enlazarBotonesFavoritos(els.favoritos);
     return;
   }
-  els.favoritos.innerHTML = state.favoritos
-    .map((p) => productoButtonHtml(p, true))
-    .join("");
-  // Click principal: agregar al carrito. Click en el botón "Quitar" elimina.
-  els.favoritos.querySelectorAll(".pos-prod-btn").forEach((btn) =>
+
+  // Caso 2: vacío + hay sugerencias → mostrarlas con botón "＋⭐ agregar".
+  if (state.favoritosFallback.length) {
+    els.favoritos.innerHTML = `
+      <p class="text-xs text-slate-500 mb-2">
+        Sugerencias del top vendidos · marca tus propios favoritos con ⭐
+      </p>
+      ${state.favoritosFallback.map((p) => productoButtonHtml(p, "catalogo")).join("")}
+    `;
+    enlazarBotonesFavoritos(els.favoritos);
+    return;
+  }
+
+  // Caso 3: nada que mostrar.
+  els.favoritos.innerHTML = `<div class="empty-state">Aún no hay productos favoritos. Marca uno con ⭐ desde el catálogo.</div>`;
+}
+
+/**
+ * Enlaza los listeners de los botones de productos dentro de ``contenedor``:
+ *  - Click principal en la tarjeta → agregar al carrito.
+ *  - Click en ``.btn-agregar-fav`` → agregar al backend + state local.
+ *  - Click en ``.btn-quitar-fav``  → quitar del backend + state local.
+ */
+function enlazarBotonesFavoritos(contenedor) {
+  contenedor.querySelectorAll(".pos-prod-btn").forEach((btn) =>
     btn.addEventListener("click", (ev) => {
-      if (ev.target?.closest?.(".btn-quitar-fav")) return;
+      if (ev.target?.closest?.(".pos-fav-toggle")) return;
       agregarAlCarrito(Number(btn.dataset.id));
     }),
   );
-  els.favoritos.querySelectorAll(".btn-quitar-fav").forEach((btn) =>
+  contenedor.querySelectorAll(".btn-quitar-fav").forEach((btn) =>
     btn.addEventListener("click", async (ev) => {
       ev.stopPropagation();
-      const pid = Number(btn.dataset.id);
-      await quitarDeFavoritos(pid);
+      ev.preventDefault();
+      await quitarDeFavoritos(Number(btn.dataset.id));
     }),
   );
-  els.favoritos.querySelectorAll(".btn-agregar-fav").forEach((btn) =>
+  contenedor.querySelectorAll(".btn-agregar-fav").forEach((btn) =>
     btn.addEventListener("click", async (ev) => {
       ev.stopPropagation();
-      const pid = Number(btn.dataset.id);
-      await agregarAFavoritos(pid);
+      ev.preventDefault();
+      await agregarAFavoritos(Number(btn.dataset.id));
     }),
   );
 }
 
-/** Agrega un producto a los favoritos del usuario actual. */
+/**
+ * Agrega un producto a los favoritos del usuario actual.
+ *
+ * Estrategia: actualiza inmediatamente el estado local en vez de re-pedir
+ * la lista al backend, así evitamos race conditions donde un fallback de
+ * top-vendidos termine "tapando" la edición del usuario.
+ */
 async function agregarAFavoritos(productoId) {
+  if (state.favoritosIds.has(productoId)) return; // idempotente local
+
   try {
-    await post("/productos/favoritos", { producto_id: productoId });
-    showToast("⭐ Agregado a favoritos", "success");
-    await cargarFavoritos();
+    const producto = await post("/productos/favoritos", {
+      producto_id: productoId,
+    });
+    // El backend devuelve el producto completo (idempotente). Si falla, lanzará.
+    const prod =
+      producto && typeof producto === "object" && producto.id
+        ? producto
+        : state.productos.find((p) => p.id === productoId);
+    if (!prod) {
+      // No deberíamos llegar aquí, pero por seguridad refrescamos.
+      await cargarFavoritos();
+      return;
+    }
+
+    state.favoritos = [
+      ...state.favoritos.filter((p) => p.id !== prod.id),
+      prod,
+    ];
+    state.favoritosIds.add(prod.id);
+    // Si estaba en la lista de sugerencias, la removemos para no duplicar.
+    state.favoritosFallback = state.favoritosFallback.filter(
+      (p) => p.id !== prod.id,
+    );
+
+    persistirFavoritosLocal();
+    renderFavoritos();
+    renderCatalogo();
+    showToast(`⭐ ${prod.nombre} agregado a favoritos`, "success");
   } catch (error) {
     showToast(`Error agregando favorito: ${error.message}`, "error");
   }
 }
 
-/** Quita un producto de los favoritos del usuario actual. */
+/**
+ * Quita un producto de los favoritos del usuario actual.
+ *
+ * - Mutamos ``state.favoritos`` / ``state.favoritosIds`` localmente.
+ * - Si el usuario se queda sin favoritos reales, recargamos las sugerencias
+ *   (top-vendidos) para no dejar la sección vacía, pero seguimos sin
+ *   contarlas como favoritos del usuario.
+ */
 async function quitarDeFavoritos(productoId) {
+  // Snapshot por si el backend falla y debemos restaurar.
+  const snapshot = {
+    favs: [...state.favoritos],
+    ids: new Set(state.favoritosIds),
+  };
+
   try {
     await deleteApi(`/productos/favoritos/${productoId}`);
-    showToast("Producto quitado de favoritos", "info");
-    await cargarFavoritos();
+
+    const removido =
+      state.favoritos.find((p) => p.id === productoId) ||
+      state.productos.find((p) => p.id === productoId);
+
+    state.favoritos = state.favoritos.filter((p) => p.id !== productoId);
+    state.favoritosIds.delete(productoId);
+    persistirFavoritosLocal();
+
+    // Si quedó vacía, traemos sugerencias para que el panel no se quede en
+    // blanco, pero NO las agregamos a ``favoritosIds``.
+    if (state.favoritos.length === 0) {
+      try {
+        const top = await get("/productos/favoritos?limit=10");
+        state.favoritosFallback = Array.isArray(top)
+          ? top.filter((p) => p.id !== productoId)
+          : [];
+      } catch (_) {
+        state.favoritosFallback = [];
+      }
+    }
+
+    renderFavoritos();
+    renderCatalogo();
+    showToast(
+      removido
+        ? `${removido.nombre} quitado de favoritos`
+        : "Producto quitado de favoritos",
+      "info",
+    );
   } catch (error) {
+    state.favoritos = snapshot.favs;
+    state.favoritosIds = snapshot.ids;
+    persistirFavoritosLocal();
+    renderFavoritos();
+    renderCatalogo();
     showToast(`Error quitando favorito: ${error.message}`, "error");
   }
 }
@@ -354,7 +480,7 @@ function renderCatalogo() {
           <span class="text-xs text-slate-500 mr-2">${productos.length}</span>
         </summary>
         <div class="pos-categoria-body pos-favoritos-grid">
-          ${productos.map((p) => productoButtonHtml(p, false)).join("")}
+          ${productos.map((p) => productoButtonHtml(p, "catalogo")).join("")}
         </div>
       </details>
     `);
@@ -363,43 +489,38 @@ function renderCatalogo() {
     partes.join("") ||
     `<div class="empty-state">Sin productos para "${filtro}"</div>`;
 
-  els.categorias.querySelectorAll(".pos-prod-btn").forEach((btn) =>
-    btn.addEventListener("click", (ev) => {
-      // Si el click viene de un sub-botón (⭐), no agregar al carrito.
-      if (ev.target?.closest?.(".pos-fav-toggle")) return;
-      agregarAlCarrito(Number(btn.dataset.id));
-    }),
-  );
-  els.categorias.querySelectorAll(".btn-agregar-fav").forEach((btn) =>
-    btn.addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      await agregarAFavoritos(Number(btn.dataset.id));
-    }),
-  );
-  els.categorias.querySelectorAll(".btn-quitar-fav").forEach((btn) =>
-    btn.addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      await quitarDeFavoritos(Number(btn.dataset.id));
-    }),
-  );
+  // Reusa el mismo cableado que el panel de favoritos: click principal → al
+  // carrito; click en ＋⭐ / ✖ → toggle de favorito (con stopPropagation).
+  enlazarBotonesFavoritos(els.categorias);
 }
 
 /**
  * Renderiza un botón de producto.
  *
  * @param {object} p - producto
- * @param {boolean} esFavorito - si true, muestra el botón "Quitar"; si false
- *   y el producto NO está en favoritos del usuario, muestra "+ Favorito".
+ * @param {"favorito"|"catalogo"} contexto
+ *   - ``"favorito"``: el producto se está renderizando dentro del panel de
+ *     favoritos REALES del usuario. Muestra el botón ``✖`` para quitarlo.
+ *   - ``"catalogo"``: el producto está en el catálogo (o sugerencias). Si
+ *     todavía no está en los favoritos del usuario, muestra ``＋⭐``.
+ *
+ * El estado "es favorito real" se determina por ``state.favoritosIds``,
+ * que NO incluye las sugerencias / top-vendidos.
  */
-function productoButtonHtml(p, esFavorito) {
+function productoButtonHtml(p, contexto = "catalogo") {
   const badge = p.porcion ? `<span class="pos-prod-badge">${p.porcion}</span>` : "";
-  const enFavs = esFavorito || state.favoritosIds.has(p.id);
-  const star = enFavs ? "⭐ " : "";
-  const accionFav = esFavorito
-    ? `<button class="btn-quitar-fav pos-fav-toggle" data-id="${p.id}" title="Quitar de favoritos" type="button">✖</button>`
-    : enFavs
-      ? ""
-      : `<button class="btn-agregar-fav pos-fav-toggle" data-id="${p.id}" title="Agregar a favoritos" type="button">＋⭐</button>`;
+  const esFavoritoReal = state.favoritosIds.has(p.id);
+  const star = esFavoritoReal || contexto === "favorito" ? "⭐ " : "";
+
+  let accionFav = "";
+  if (contexto === "favorito") {
+    // Panel de favoritos reales → permitir quitar.
+    accionFav = `<button class="btn-quitar-fav pos-fav-toggle" data-id="${p.id}" title="Quitar de favoritos" type="button" aria-label="Quitar de favoritos">✖</button>`;
+  } else if (!esFavoritoReal) {
+    // Catálogo / sugerencias → permitir agregar (sólo si aún no es favorito).
+    accionFav = `<button class="btn-agregar-fav pos-fav-toggle" data-id="${p.id}" title="Agregar a favoritos" type="button" aria-label="Agregar a favoritos">＋⭐</button>`;
+  }
+
   return `
     <button data-id="${p.id}" class="pos-prod-btn" type="button">
       ${badge}
