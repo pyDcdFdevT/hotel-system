@@ -75,6 +75,139 @@ def test_productos_crud_editar_y_eliminar(client):
     assert payload["borrado"] is True
 
 
+def test_habitaciones_24(client):
+    habs = client.get("/api/habitaciones/").json()
+    numeros = sorted(h["numero"] for h in habs)
+    esperados = sorted(
+        [str(n) for n in list(range(101, 112))
+                        + list(range(201, 211))
+                        + list(range(301, 304))]
+    )
+    assert len(habs) >= 24
+    for numero in esperados:
+        assert numero in numeros, f"Falta habitación {numero}"
+
+
+def test_estados_habitaciones(client):
+    habs = client.get("/api/habitaciones/").json()
+    disponibles = {h["numero"] for h in habs if h["estado"] == "disponible"}
+    inhabilitadas = {h["numero"] for h in habs if h["estado"] == "inhabilitada"}
+    for n in range(101, 112):
+        assert str(n) in disponibles
+    for n in list(range(201, 211)) + list(range(301, 304)):
+        assert str(n) in inhabilitadas
+
+    # Cambiar estado vía PUT /habitaciones/{id}/estado
+    objetivo = next(h for h in habs if h["numero"] == "101")
+    resp = client.put(
+        f"/api/habitaciones/{objetivo['id']}/estado",
+        json={"estado": "limpieza"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["estado"] == "limpieza"
+
+    # Devolver a disponible para no romper siguientes tests.
+    client.put(
+        f"/api/habitaciones/{objetivo['id']}/estado",
+        json={"estado": "disponible"},
+    )
+
+
+def test_checkin_checkout(client):
+    habs = client.get("/api/habitaciones/").json()
+    libre = next(
+        h for h in habs if h["estado"] == "disponible" and h["numero"] == "102"
+    )
+
+    # Check-in.
+    resp = client.post(
+        f"/api/habitaciones/{libre['id']}/checkin",
+        json={
+            "huesped": "Pedro Pérez",
+            "documento": "V-12345678",
+            "noches": 2,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    reserva = resp.json()
+    assert reserva["estado"] == "activa"
+    assert reserva["noches"] == 2
+
+    # Habitación debe estar ocupada.
+    detalle = client.get(f"/api/habitaciones/{libre['id']}").json()
+    assert detalle["estado"] == "ocupada"
+
+    # No se permite check-in duplicado.
+    dup = client.post(
+        f"/api/habitaciones/{libre['id']}/checkin",
+        json={"huesped": "Otro", "noches": 1},
+    )
+    assert dup.status_code == 400
+
+    # Crear un pedido contra la habitación para que tenga consumos.
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+    client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "habitacion",
+            "habitacion_numero": "102",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 2}],
+        },
+    )
+
+    # Preview del checkout: debe incluir estadía + consumos.
+    preview = client.get(f"/api/habitaciones/{libre['id']}/checkout-preview").json()
+    assert float(preview["tarifa_usd"]) > 0
+    assert float(preview["consumos_usd"]) > 0
+    assert len(preview["pedidos"]) == 1
+
+    # Check-out.
+    resp_out = client.post(
+        f"/api/habitaciones/{libre['id']}/checkout",
+        json={"metodo_pago": "usd", "monto_recibido_usd": preview["total_usd"]},
+    )
+    assert resp_out.status_code == 200, resp_out.text
+
+    # Habitación → limpieza, reserva cerrada, pedido pagado.
+    assert (
+        client.get(f"/api/habitaciones/{libre['id']}").json()["estado"] == "limpieza"
+    )
+    abiertos = client.get("/api/pedidos/por-habitacion/102").json()
+    assert abiertos == []
+
+
+def test_pedido_con_habitacion_numero(client):
+    # Habitación inhabilitada NO acepta consumos.
+    productos = client.get("/api/productos/").json()
+    cerveza = next(p for p in productos if p["nombre"] == "Cerveza Solera")
+    bloqueado = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "habitacion",
+            "habitacion_numero": "201",  # inhabilitada
+            "items": [{"producto_id": cerveza["id"], "cantidad": 1}],
+        },
+    )
+    assert bloqueado.status_code == 400
+
+    # Habitación disponible (sin check-in) sí acepta.
+    resp = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "habitacion",
+            "habitacion_numero": "103",
+            "items": [{"producto_id": cerveza["id"], "cantidad": 1}],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    pedido = resp.json()
+    assert pedido["habitacion_numero"] == "103"
+
+    listado = client.get("/api/pedidos/por-habitacion/103").json()
+    assert any(p["id"] == pedido["id"] for p in listado)
+
+
 def test_agregar_items_a_pedido_existente(client):
     productos = client.get("/api/productos/").json()
     p1 = next(p for p in productos if p["nombre"] == "Mojito")
@@ -151,16 +284,17 @@ def test_habitaciones_seed(client):
     response = client.get("/api/habitaciones/")
     assert response.status_code == 200
     data = response.json()
-    assert len(data) == 10
-    numeros = sorted(int(h["numero"]) for h in data)
-    assert numeros == list(range(101, 111))
+    assert len(data) >= 24
+    numeros = {int(h["numero"]) for h in data}
+    for n in list(range(101, 112)) + list(range(201, 211)) + list(range(301, 304)):
+        assert n in numeros
 
 
 def test_resumen_dia(client):
     response = client.get("/api/reportes/resumen-dia")
     assert response.status_code == 200
     body = response.json()
-    assert body["habitaciones_totales"] == 10
+    assert body["habitaciones_totales"] >= 24
     assert body["habitaciones_ocupadas"] == 0
 
 

@@ -11,6 +11,7 @@ from app.models import (
     ConsumoHabitacion,
     CuentaBanco,
     DetallePedido,
+    Habitacion,
     MovimientoCuenta,
     Pedido,
     Producto,
@@ -86,6 +87,28 @@ def listar_activos(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error listando pedidos activos: {exc}") from exc
 
 
+@router.get("/por-habitacion/{numero}", response_model=List[PedidoOut])
+def listar_por_habitacion(
+    numero: str,
+    incluir_cerrados: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    """Pedidos asociados a un número de habitación (abiertos por defecto)."""
+    try:
+        query = (
+            db.query(Pedido)
+            .options(joinedload(Pedido.detalles))
+            .filter(Pedido.habitacion_numero == numero)
+        )
+        if not incluir_cerrados:
+            query = query.filter(Pedido.estado == "abierto")
+        return query.order_by(Pedido.fecha.desc()).all()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Error listando pedidos por habitación: {exc}"
+        ) from exc
+
+
 @router.get("/{pedido_id}", response_model=PedidoOut)
 def obtener(pedido_id: int, db: Session = Depends(get_db)):
     return _cargar_pedido(db, pedido_id)
@@ -96,11 +119,28 @@ def crear_pedido(data: PedidoCreate, db: Session = Depends(get_db)):
     if data.tipo not in TIPOS_VALIDOS:
         raise HTTPException(status_code=400, detail=f"Tipo inválido. Use: {sorted(TIPOS_VALIDOS)}")
 
+    habitacion_numero = (data.habitacion_numero or "").strip() or None
+    if habitacion_numero:
+        habitacion = (
+            db.query(Habitacion).filter(Habitacion.numero == habitacion_numero).first()
+        )
+        if not habitacion:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Habitación '{habitacion_numero}' no existe",
+            )
+        if habitacion.estado == "inhabilitada":
+            raise HTTPException(
+                status_code=400,
+                detail=f"La habitación {habitacion_numero} está inhabilitada y no acepta consumos",
+            )
+
     try:
         tasa = obtener_tasa_bcv(db)
         pedido = Pedido(
             tipo=data.tipo,
             mesa=data.mesa,
+            habitacion_numero=habitacion_numero,
             reserva_id=data.reserva_id,
             estado="abierto",
             tasa_usd_del_dia=tasa,

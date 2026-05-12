@@ -97,6 +97,48 @@ class ReservaCheckout(BaseModel):
     notas: Optional[str] = None
 
 
+class HabitacionCheckinRequest(BaseModel):
+    """Check-in directo desde la grilla de habitaciones."""
+
+    huesped: str = Field(..., min_length=2, max_length=120)
+    documento: Optional[str] = Field(default=None, max_length=40)
+    telefono: Optional[str] = Field(default=None, max_length=40)
+    fecha_checkin: Optional[date] = None
+    fecha_checkout_estimado: Optional[date] = None
+    noches: int = Field(default=1, ge=1)
+    tarifa_usd: Optional[Decimal] = Field(default=None, ge=0)
+    tarifa_bs: Optional[Decimal] = Field(default=None, ge=0)
+    notas: Optional[str] = None
+
+
+class HabitacionCheckoutRequest(BaseModel):
+    """Check-out + cobro de la habitación (estadía + consumos)."""
+
+    metodo_pago: str = Field(default="bs", min_length=2, max_length=20)
+    cuenta_banco_id: Optional[int] = Field(default=None, gt=0)
+    monto_recibido_bs: Decimal = Field(default=Decimal("0"), ge=0)
+    monto_recibido_usd: Decimal = Field(default=Decimal("0"), ge=0)
+    tasa_tipo: Optional[str] = Field(default=None, max_length=20)
+    notas: Optional[str] = None
+
+
+class HabitacionCheckoutPreview(BaseModel):
+    """Resumen de lo que se cobrará al hacer checkout."""
+
+    habitacion_id: int
+    numero: str
+    reserva_id: Optional[int] = None
+    huesped: Optional[str] = None
+    noches: int = 0
+    tarifa_usd: Decimal = Decimal("0")
+    tarifa_bs: Decimal = Decimal("0")
+    consumos_usd: Decimal = Decimal("0")
+    consumos_bs: Decimal = Decimal("0")
+    total_usd: Decimal = Decimal("0")
+    total_bs: Decimal = Decimal("0")
+    pedidos: List[int] = []
+
+
 class ReservaOut(ORMModel):
     id: int
     habitacion_id: int
@@ -215,6 +257,7 @@ class DetallePedidoIn(BaseModel):
 class PedidoCreate(BaseModel):
     tipo: str = Field(default="restaurante", max_length=30)
     mesa: Optional[str] = Field(default=None, max_length=20)
+    habitacion_numero: Optional[str] = Field(default=None, max_length=10)
     reserva_id: Optional[int] = Field(default=None, gt=0)
     items: List[DetallePedidoIn] = Field(..., min_length=1)
     notas: Optional[str] = None
@@ -246,6 +289,7 @@ class PedidoOut(ORMModel):
     id: int
     tipo: str
     mesa: Optional[str] = None
+    habitacion_numero: Optional[str] = None
     reserva_id: Optional[int] = None
     estado: str
     fecha: datetime

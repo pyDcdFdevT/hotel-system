@@ -79,6 +79,15 @@ class Habitacion(Base):
     reservas = relationship("Reserva", back_populates="habitacion")
 
 
+ESTADOS_HABITACION = (
+    "disponible",
+    "ocupada",
+    "reservada",
+    "limpieza",
+    "inhabilitada",
+)
+
+
 # ---------------------------------------------------------------------------
 # Reservas y consumos
 # ---------------------------------------------------------------------------
@@ -200,6 +209,7 @@ class Pedido(Base):
     id = Column(Integer, primary_key=True, index=True)
     tipo = Column(String(30), default="restaurante", nullable=False, index=True)
     mesa = Column(String(20), index=True)
+    habitacion_numero = Column(String(10), index=True)
     reserva_id = Column(Integer, ForeignKey("reservas.id"), index=True)
     estado = Column(String(20), default="abierto", nullable=False, index=True)
     fecha = Column(DateTime, default=caracas_now, nullable=False, index=True)

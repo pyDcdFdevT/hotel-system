@@ -33,8 +33,10 @@ const state = {
   pedidoActivo: null,
   mesaActiva: null,
   mesaTipo: "restaurante",
+  habitacionNumero: null,
   reservaId: null,
   mesasActivas: [],
+  habitaciones: [],
   tasas: { bcv: 405.35, paralelo: 415.0 },
   tasaTipo: "bcv",
 };
@@ -60,6 +62,10 @@ const els = {
   formNuevaMesa: document.getElementById("form-nueva-mesa"),
   nuevaMesaCancelar: document.getElementById("nueva-mesa-cancelar"),
   reservaSelect: document.getElementById("pos-reserva"),
+  bloqueMesa: document.getElementById("nueva-mesa-bloque-mesa"),
+  bloqueHabitacion: document.getElementById("nueva-mesa-bloque-habitacion"),
+  inputHabitacion: document.getElementById("pos-input-habitacion"),
+  habitacionesList: document.getElementById("pos-habitaciones-list"),
 
   modalPago: document.getElementById("modal-pago"),
   formPago: document.getElementById("form-pago"),
@@ -98,6 +104,12 @@ export async function initPedidos() {
 
   restaurarLocal();
 
+  if (els.formNuevaMesa) {
+    els.formNuevaMesa
+      .querySelectorAll('input[name="modo"]')
+      .forEach((radio) => radio.addEventListener("change", actualizarModoNuevaMesa));
+  }
+
   await Promise.all([
     cargarTasas(),
     cargarProductos(),
@@ -105,6 +117,7 @@ export async function initPedidos() {
     cargarReservasActivas(),
     cargarCuentas(),
     cargarMesasActivas(),
+    cargarHabitaciones(),
   ]);
 
   if (favRefreshTimer) clearInterval(favRefreshTimer);
@@ -316,6 +329,7 @@ function renderMesasChips() {
 
 function abrirNuevaMesa() {
   els.formNuevaMesa?.reset();
+  actualizarModoNuevaMesa();
   els.modalNuevaMesa?.classList.remove("hidden");
 }
 
@@ -323,25 +337,83 @@ function cerrarNuevaMesa() {
   els.modalNuevaMesa?.classList.add("hidden");
 }
 
+function actualizarModoNuevaMesa() {
+  const modo =
+    els.formNuevaMesa?.querySelector('input[name="modo"]:checked')?.value || "mesa";
+  if (els.bloqueMesa) els.bloqueMesa.classList.toggle("hidden", modo !== "mesa");
+  if (els.bloqueHabitacion)
+    els.bloqueHabitacion.classList.toggle("hidden", modo !== "habitacion");
+}
+
+async function cargarHabitaciones() {
+  if (!els.habitacionesList) return;
+  try {
+    state.habitaciones = await get("/habitaciones/");
+    els.habitacionesList.innerHTML = state.habitaciones
+      .filter((h) => h.estado !== "inhabilitada")
+      .map(
+        (h) =>
+          `<option value="${h.numero}">Hab ${h.numero} · ${h.estado}</option>`,
+      )
+      .join("");
+  } catch (error) {
+    console.warn("No se pudieron cargar habitaciones", error);
+  }
+}
+
 async function crearNuevaMesa(event) {
   event.preventDefault();
   const formData = new FormData(els.formNuevaMesa);
-  state.mesaActiva = formData.get("mesa")?.toString().trim() || null;
-  state.mesaTipo = formData.get("tipo")?.toString() || "restaurante";
+  const modo = formData.get("modo")?.toString() || "mesa";
+  const mesa = formData.get("mesa")?.toString().trim() || null;
+  const habitacion = formData.get("habitacion_numero")?.toString().trim() || null;
+
+  if (modo === "habitacion") {
+    if (!habitacion) {
+      showToast("Indique el número de habitación", "error");
+      return;
+    }
+    const hab = state.habitaciones.find((h) => h.numero === habitacion);
+    if (!hab) {
+      showToast(`Habitación ${habitacion} no existe`, "error");
+      return;
+    }
+    if (hab.estado === "inhabilitada") {
+      showToast(
+        `La habitación ${habitacion} está inhabilitada y no acepta consumos`,
+        "error",
+      );
+      return;
+    }
+    state.habitacionNumero = habitacion;
+    state.mesaActiva = `Hab ${habitacion}`;
+    state.mesaTipo = "habitacion";
+  } else {
+    if (!mesa) {
+      showToast("Indique mesa o cliente", "error");
+      return;
+    }
+    state.habitacionNumero = null;
+    state.mesaActiva = mesa;
+    state.mesaTipo = formData.get("tipo")?.toString() || "restaurante";
+  }
   state.reservaId = Number(formData.get("reserva_id")) || null;
   state.pedidoActivo = null;
   state.carrito.clear();
   cerrarNuevaMesa();
   refrescarUI();
-  showToast(`Mesa "${state.mesaActiva}" abierta. Añade productos.`, "info");
+  showToast(`Cuenta "${state.mesaActiva}" abierta. Añade productos.`, "info");
 }
 
 async function seleccionarMesa(pedidoId) {
   try {
     const pedido = await get(`/pedidos/${pedidoId}`);
     state.pedidoActivo = pedido;
-    state.mesaActiva = pedido.mesa || `Pedido #${pedido.id}`;
+    state.mesaActiva =
+      pedido.mesa ||
+      (pedido.habitacion_numero ? `Hab ${pedido.habitacion_numero}` : `Pedido #${pedido.id}`);
     state.mesaTipo = pedido.tipo;
+    state.habitacionNumero = pedido.habitacion_numero || null;
     state.reservaId = pedido.reserva_id || null;
     state.carrito.clear();
     refrescarUI();
@@ -395,6 +467,7 @@ function nuevoPedido() {
   state.pedidoActivo = null;
   state.mesaActiva = null;
   state.mesaTipo = "restaurante";
+  state.habitacionNumero = null;
   state.reservaId = null;
   localStorage.removeItem(STORAGE_KEY);
   refrescarUI();
@@ -549,7 +622,8 @@ async function asegurarPedidoActivo() {
   }
   const payload = {
     tipo: state.mesaTipo || "restaurante",
-    mesa: state.mesaActiva || null,
+    mesa: state.habitacionNumero ? null : state.mesaActiva || null,
+    habitacion_numero: state.habitacionNumero || null,
     reserva_id: state.reservaId || null,
     items: Array.from(state.carrito.values()).map((item) => ({
       producto_id: item.producto.id,
@@ -669,6 +743,7 @@ function persistirLocal() {
     const snapshot = {
       mesaActiva: state.mesaActiva,
       mesaTipo: state.mesaTipo,
+      habitacionNumero: state.habitacionNumero,
       reservaId: state.reservaId,
       pedidoActivoId: state.pedidoActivo?.id || null,
       carrito: Array.from(state.carrito.values()).map((item) => ({
@@ -689,6 +764,7 @@ function restaurarLocal() {
     const snap = JSON.parse(raw);
     state.mesaActiva = snap.mesaActiva || null;
     state.mesaTipo = snap.mesaTipo || "restaurante";
+    state.habitacionNumero = snap.habitacionNumero || null;
     state.reservaId = snap.reservaId || null;
     // El carrito local se reconstruye cuando lleguen los productos.
     state._pendiente = snap.carrito || [];

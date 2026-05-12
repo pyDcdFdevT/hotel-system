@@ -130,9 +130,9 @@
             <option value="">Todas</option>
             <option value="disponible">Disponibles</option>
             <option value="ocupada">Ocupadas</option>
+            <option value="reservada">Reservadas</option>
             <option value="limpieza">Limpieza</option>
-            <option value="mantenimiento">Mantenimiento</option>
-            <option value="bloqueada">Bloqueadas</option>
+            <option value="inhabilitada">Inhabilitadas</option>
           </select>
           <button id="habs-btn-nuevo" class="px-3 py-1 rounded bg-blue-600 text-white text-sm">Nueva</button>
         </div>
@@ -164,9 +164,9 @@
             <label class="text-xs uppercase text-slate-500">Estado</label>
             <select name="estado" class="w-full border rounded px-2 py-1">
               <option value="disponible">disponible</option>
+              <option value="reservada">reservada</option>
               <option value="limpieza">limpieza</option>
-              <option value="mantenimiento">mantenimiento</option>
-              <option value="bloqueada">bloqueada</option>
+              <option value="inhabilitada">inhabilitada</option>
             </select>
           </div>
           <div>
@@ -176,6 +176,102 @@
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" id="habs-modal-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
             <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Crear</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Modal Check-in -->
+      <div id="modal-checkin" class="modal-backdrop hidden">
+        <form id="form-checkin" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold" id="checkin-titulo">Check-in</h3>
+          <input type="hidden" id="checkin-habitacion-id" name="habitacion_id" />
+          <div>
+            <label class="text-xs uppercase text-slate-500">Huésped</label>
+            <input name="huesped" required class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Documento</label>
+              <input name="documento" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Teléfono</label>
+              <input name="telefono" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Check-in</label>
+              <input type="date" name="fecha_checkin" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Check-out estimado</label>
+              <input type="date" name="fecha_checkout_estimado" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Noches</label>
+              <input type="number" name="noches" min="1" value="1" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Tarifa USD</label>
+              <input id="checkin-tarifa" type="number" step="0.01" name="tarifa_usd" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Notas</label>
+            <input name="notas" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="checkin-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Confirmar check-in</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Modal Check-out -->
+      <div id="modal-checkout" class="modal-backdrop hidden">
+        <form id="form-checkout" class="card p-5 w-full max-w-md space-y-3">
+          <h3 class="text-lg font-semibold">Check-out y cobro</h3>
+          <input type="hidden" id="checkout-habitacion-id" name="habitacion_id" />
+          <div id="checkout-resumen" class="border rounded p-3 bg-slate-50"></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Método</label>
+              <select name="metodo_pago" class="w-full border rounded px-2 py-1">
+                <option value="bs">Bolívares</option>
+                <option value="usd">Dólares</option>
+                <option value="mixto">Mixto</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="pagomovil">Pago Móvil</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Tasa</label>
+              <select name="tasa_tipo" class="w-full border rounded px-2 py-1">
+                <option value="bcv">BCV</option>
+                <option value="paralelo">Paralelo</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs uppercase text-slate-500">Recibido Bs</label>
+              <input type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs uppercase text-slate-500">Recibido USD</label>
+              <input type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Notas</label>
+            <input name="notas" class="w-full border rounded px-2 py-1" />
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="checkout-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-red-600 text-white rounded">Cobrar y cerrar</button>
           </div>
         </form>
       </div>
@@ -366,11 +462,29 @@
       <!-- Modal nueva mesa -->
       <div id="modal-nueva-mesa" class="modal-backdrop hidden">
         <form id="form-nueva-mesa" class="card p-5 w-full max-w-md space-y-3">
-          <h3 class="text-lg font-semibold">Nueva mesa o cliente</h3>
-          <div>
-            <label class="text-xs uppercase text-slate-500">Mesa / Cliente</label>
-            <input name="mesa" placeholder="Ej: Mesa 5 o Juan Pérez" required class="w-full border rounded px-2 py-1" />
+          <h3 class="text-lg font-semibold">Nueva cuenta</h3>
+
+          <div class="flex gap-2 text-sm">
+            <label class="flex items-center gap-1">
+              <input type="radio" name="modo" value="mesa" checked /> Mesa / Cliente
+            </label>
+            <label class="flex items-center gap-1">
+              <input type="radio" name="modo" value="habitacion" /> Habitación
+            </label>
           </div>
+
+          <div id="nueva-mesa-bloque-mesa">
+            <label class="text-xs uppercase text-slate-500">Mesa / Cliente</label>
+            <input name="mesa" placeholder="Ej: Mesa 5 o Juan Pérez" class="w-full border rounded px-2 py-1" />
+          </div>
+
+          <div id="nueva-mesa-bloque-habitacion" class="hidden">
+            <label class="text-xs uppercase text-slate-500">Habitación (número)</label>
+            <input id="pos-input-habitacion" name="habitacion_numero" list="pos-habitaciones-list" placeholder="Ej: 101" class="w-full border rounded px-2 py-1" />
+            <datalist id="pos-habitaciones-list"></datalist>
+            <p class="text-xs text-slate-500 mt-1">La cuenta se registra contra el número de habitación, incluso sin check-in previo.</p>
+          </div>
+
           <div>
             <label class="text-xs uppercase text-slate-500">Tipo</label>
             <select name="tipo" class="w-full border rounded px-2 py-1">
@@ -386,7 +500,7 @@
           </div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" id="nueva-mesa-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
-            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Abrir mesa</button>
+            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Abrir cuenta</button>
           </div>
         </form>
       </div>

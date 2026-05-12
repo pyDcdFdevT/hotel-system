@@ -60,9 +60,74 @@ body {
 
 .room-disponible { background-color: #dcfce7; border-color: #16a34a; }
 .room-ocupada { background-color: #fee2e2; border-color: #dc2626; }
-.room-limpieza { background-color: #fef9c3; border-color: #ca8a04; }
-.room-mantenimiento { background-color: #e0e7ff; border-color: #4338ca; }
-.room-bloqueada { background-color: #f1f5f9; border-color: #64748b; }
+.room-reservada { background-color: #fef9c3; border-color: #ca8a04; }
+.room-limpieza { background-color: #ffedd5; border-color: #ea580c; }
+.room-inhabilitada { background-color: #f1f5f9; border-color: #6b7280; opacity: 0.85; }
+/* Compatibilidad con estados legacy. */
+.room-mantenimiento { background-color: #ffedd5; border-color: #ea580c; }
+.room-bloqueada { background-color: #f1f5f9; border-color: #6b7280; opacity: 0.85; }
+
+.estado-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+}
+
+.estado-disponible { background-color: #22c55e; }
+.estado-ocupada { background-color: #ef4444; }
+.estado-reservada { background-color: #eab308; color: #1f2937; }
+.estado-limpieza { background-color: #f97316; }
+.estado-inhabilitada { background-color: #6b7280; }
+
+.hab-card {
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  padding: 0.85rem;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.hab-card .hab-numero {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.hab-card .hab-precio {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.hab-card .hab-acciones {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.hab-card button {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btn-checkin { background-color: #2563eb; color: #ffffff; }
+.btn-checkout { background-color: #dc2626; color: #ffffff; }
+.btn-limpieza-ok { background-color: #16a34a; color: #ffffff; }
+.btn-habilitar { background-color: #475569; color: #ffffff; }
+.btn-cancelar { background-color: #ffffff; color: #dc2626; border-color: #dc2626; }
+.btn-checkin-resv { background-color: #16a34a; color: #ffffff; }
 
 .badge {
   display: inline-flex;

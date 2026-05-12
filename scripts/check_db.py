@@ -183,6 +183,96 @@ def _migrar_productos(engine) -> None:
             conn.execute(text("ALTER TABLE productos ADD COLUMN porcion VARCHAR(20)"))
 
 
+def _migrar_estados_habitaciones(engine) -> None:
+    """Renombra estados legacy y crea las habitaciones 201-210 + 301-303 si faltan."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existe = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='habitaciones'")
+        ).first()
+        if not existe and _is_sqlite(engine):
+            return
+
+        if _is_sqlite(engine):
+            info = conn.execute(text("PRAGMA table_info(habitaciones)")).fetchall()
+            columnas = {row[1] for row in info}
+            if "estado" not in columnas:
+                print("[check_db] Migrando habitaciones: añadiendo columna 'estado'…")
+                conn.execute(
+                    text(
+                        "ALTER TABLE habitaciones ADD COLUMN estado VARCHAR(20) "
+                        "NOT NULL DEFAULT 'disponible'"
+                    )
+                )
+
+        # Mapear estados antiguos a los nuevos cinco valores soportados.
+        mapping = {
+            "mantenimiento": "inhabilitada",
+            "bloqueada": "inhabilitada",
+            "fuera_servicio": "inhabilitada",
+        }
+        for viejo, nuevo in mapping.items():
+            try:
+                result = conn.execute(
+                    text("UPDATE habitaciones SET estado = :nuevo WHERE estado = :viejo"),
+                    {"viejo": viejo, "nuevo": nuevo},
+                )
+                if result.rowcount:
+                    print(
+                        f"[check_db] Estado '{viejo}' migrado a '{nuevo}' "
+                        f"en {result.rowcount} habitacion(es)."
+                    )
+            except Exception as exc:
+                print(f"[check_db] Aviso migrando estado {viejo}: {exc}")
+
+        # Habitaciones extra (sólo si no existen): 201-210 y 301-303 inhabilitadas.
+        numeros_inhab = [str(n) for n in list(range(201, 211)) + list(range(301, 304))]
+        for numero in numeros_inhab:
+            try:
+                conn.execute(
+                    text(
+                        "INSERT INTO habitaciones "
+                        "(numero, tipo, precio_bs, precio_usd, estado, created_at, updated_at) "
+                        "SELECT :numero, 'standard', 8000.00, 20.00, 'inhabilitada', "
+                        "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+                        "WHERE NOT EXISTS ("
+                        "  SELECT 1 FROM habitaciones WHERE numero = :numero"
+                        ")"
+                    ),
+                    {"numero": numero},
+                )
+            except Exception as exc:
+                print(f"[check_db] Aviso insertando habitación {numero}: {exc}")
+
+
+def _migrar_pedidos_habitacion(engine) -> None:
+    """Añade columna ``habitacion_numero`` a la tabla ``pedidos`` (cuenta por habitación)."""
+    if not _is_sqlite(engine):
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existe = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='pedidos'")
+        ).first()
+        if not existe:
+            return
+        info = conn.execute(text("PRAGMA table_info(pedidos)")).fetchall()
+        columnas = {row[1] for row in info}
+        if "habitacion_numero" not in columnas:
+            print("[check_db] Migrando pedidos: añadiendo columna 'habitacion_numero'…")
+            conn.execute(
+                text("ALTER TABLE pedidos ADD COLUMN habitacion_numero VARCHAR(10)")
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_pedidos_habitacion_numero "
+                    "ON pedidos (habitacion_numero)"
+                )
+            )
+
+
 def _actualizar_precio_habitaciones(engine) -> None:
     """Cambia el precio de las habitaciones que aún están en el viejo default ($40)."""
     from sqlalchemy import text
@@ -222,6 +312,8 @@ def main() -> None:
     _renombrar_cuentas(engine)
     _migrar_productos(engine)
     _actualizar_precio_habitaciones(engine)
+    _migrar_estados_habitaciones(engine)
+    _migrar_pedidos_habitacion(engine)
 
     print("[check_db] Ejecutando create_all…")
     Base.metadata.create_all(bind=engine)

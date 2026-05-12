@@ -33,16 +33,23 @@ HABITACION_PRECIO_USD = Decimal("20.00")
 HABITACION_PRECIO_BS = Decimal("8000.00")
 
 
-HABITACIONES_INICIALES = [
-    {
+def _hab(numero: int, estado: str) -> dict:
+    return {
         "numero": f"{numero}",
         "tipo": "standard",
         "precio_usd": HABITACION_PRECIO_USD,
         "precio_bs": HABITACION_PRECIO_BS,
-        "estado": "disponible",
+        "estado": estado,
     }
-    for numero in range(101, 111)
-]
+
+
+# 24 habitaciones: 101-111 disponibles, 201-210 + 301-303 inhabilitadas
+# (mismo precio por si se habilitan más adelante).
+HABITACIONES_INICIALES = (
+    [_hab(n, "disponible") for n in range(101, 112)]
+    + [_hab(n, "inhabilitada") for n in range(201, 211)]
+    + [_hab(n, "inhabilitada") for n in range(301, 304)]
+)
 
 
 CATEGORIAS_GASTO = [
