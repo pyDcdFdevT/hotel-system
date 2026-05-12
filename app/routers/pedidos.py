@@ -131,19 +131,56 @@ def _agregar_estado_pedido(detalles: list[DetallePedido]) -> str:
     return "pendiente"
 
 
+AREAS_COCINA_VALIDAS = {"cocina", "bar"}
+
+
 @router.get(
     "/activos-cocina",
     response_model=List[PedidoCocinaOut],
-    dependencies=[Depends(require_roles("admin", "cocina"))],
 )
-def listar_pedidos_cocina(db: Session = Depends(get_db)):
+def listar_pedidos_cocina(
+    area: Optional[str] = Query(
+        default=None,
+        description=(
+            "Filtro opcional por área: ``cocina`` o ``bar``. Si no se "
+            "especifica, devuelve todos los pedidos pendientes."
+        ),
+    ),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
     """Pedidos abiertos con al menos un ítem pendiente/en_preparacion.
 
-    Cada pedido devuelve **todos** sus detalles para que la pantalla de
-    cocina pueda gestionarlos individualmente; sólo se filtran del listado
-    los pedidos cuyos detalles están todos en estado ``listo`` o
-    ``entregado`` (ya nada por hacer).
+    Comportamiento por rol:
+    * ``admin``: ve todos los pedidos. Puede pasar ``?area=cocina`` o
+      ``?area=bar`` para filtrar manualmente.
+    * ``cocina``: forzamos ``area=cocina`` (sólo ve ítems de cocina).
+    * ``barra``: forzamos ``area=bar`` (sólo ve ítems de barra).
+    * Cualquier otro rol → 403.
+
+    Cada pedido devuelve sólo los detalles que coinciden con el área
+    solicitada y que aún están ``pendiente`` o ``en_preparacion``; los
+    pedidos sin ítems pendientes en esa área no se incluyen.
     """
+    rol = (usuario.rol or "").lower()
+    if rol == "cocina":
+        area_efectiva: Optional[str] = "cocina"
+    elif rol == "barra":
+        area_efectiva = "bar"
+    elif rol == "admin":
+        area_efectiva = (area or "").lower().strip() or None
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. Se requiere uno de: ['admin', 'barra', 'cocina']",
+        )
+
+    if area_efectiva is not None and area_efectiva not in AREAS_COCINA_VALIDAS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Área inválida. Use: {sorted(AREAS_COCINA_VALIDAS)}",
+        )
+
     pedidos = (
         db.query(Pedido)
         .options(joinedload(Pedido.detalles).joinedload(DetallePedido.producto))
@@ -156,6 +193,41 @@ def listar_pedidos_cocina(db: Session = Depends(get_db)):
         # Si todos los detalles ya están listos/entregados, el pedido sale de cocina.
         if all((d.estado or "pendiente") in ("listo", "entregado") for d in p.detalles):
             continue
+
+        # Filtramos los detalles por área cuando aplica. Un detalle es
+        # "para cocina" si producto.area == "cocina"; análogo para "bar".
+        # El área "general" (por ejemplo bebidas sin clasificar) se asigna
+        # al área "bar" para que no se pierda.
+        def _area_detalle(det):
+            a = (det.producto.area if det.producto else None) or ""
+            a = a.lower().strip()
+            if a == "cocina":
+                return "cocina"
+            if a == "bar":
+                return "bar"
+            # "general", "piscina", … por defecto van a bar (es lo más
+            # frecuente: bebidas listas para servir).
+            return "bar"
+
+        if area_efectiva is None:
+            detalles_visibles = list(p.detalles)
+        else:
+            detalles_visibles = [
+                d for d in p.detalles if _area_detalle(d) == area_efectiva
+            ]
+
+        # Sólo nos interesan los detalles que aún no están entregados/listos.
+        # (Aunque mostremos los demás, el front decide qué hacer, pero si el
+        # filtro por área deja al pedido sin ítems "activos" del área, lo
+        # excluimos para no llenar la pantalla con tickets vacíos.)
+        if not detalles_visibles:
+            continue
+        if all(
+            (d.estado or "pendiente") in ("listo", "entregado")
+            for d in detalles_visibles
+        ):
+            continue
+
         salida.append(
             PedidoCocinaOut(
                 id=p.id,
@@ -163,7 +235,7 @@ def listar_pedidos_cocina(db: Session = Depends(get_db)):
                 habitacion_numero=p.habitacion_numero,
                 tipo=p.tipo,
                 estado=p.estado,
-                estado_cocina=_agregar_estado_pedido(list(p.detalles)),
+                estado_cocina=_agregar_estado_pedido(detalles_visibles),
                 fecha=p.fecha,
                 detalles=[
                     DetalleCocinaOut(
@@ -179,7 +251,7 @@ def listar_pedidos_cocina(db: Session = Depends(get_db)):
                         iniciado_en=d.iniciado_en,
                         listo_en=d.listo_en,
                     )
-                    for d in p.detalles
+                    for d in detalles_visibles
                 ],
             )
         )
@@ -224,8 +296,10 @@ def actualizar_estado_detalle(
     rol = (usuario.rol or "").lower()
     permitidos_por_estado = {
         "pendiente": {"admin"},
-        "en_preparacion": {"admin", "cocina"},
-        "listo": {"admin", "cocina"},
+        # Tanto cocina como barra preparan y marcan listo en su pantalla.
+        "en_preparacion": {"admin", "cocina", "barra"},
+        "listo": {"admin", "cocina", "barra"},
+        # Mesero/recepción entregan al cliente (admin todo).
         "entregado": {"admin", "mesero", "recepcion"},
     }
     if rol not in permitidos_por_estado.get(estado, set()):
@@ -278,7 +352,7 @@ def actualizar_estado_detalle(
 @router.put(
     "/{pedido_id}/cocina-estado",
     response_model=PedidoOut,
-    dependencies=[Depends(require_roles("admin", "cocina"))],
+    dependencies=[Depends(require_roles("admin", "cocina", "barra"))],
 )
 def actualizar_estado_cocina(
     pedido_id: int,

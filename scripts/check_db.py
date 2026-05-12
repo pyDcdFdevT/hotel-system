@@ -298,6 +298,58 @@ def _migrar_detalles_pedido_estado(engine) -> None:
         )
 
 
+def _seed_usuario_barra(engine) -> None:
+    """Garantiza que exista el usuario ``Barra`` (rol ``barra``, PIN 4444).
+
+    Se ejecuta antes del seed normal para que, aunque se haya editado la lista
+    de ``USUARIOS_INICIALES`` después de la primera carga, la cuenta de barra
+    quede creada en bases existentes (Railway no re-corre el seed completo).
+    """
+    if not _is_sqlite(engine):
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existe_tabla = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'")
+        ).first()
+        if not existe_tabla:
+            return  # ``create_all`` aún no corrió; el seed se encargará.
+
+        # ¿Ya existe por nombre?
+        fila = conn.execute(
+            text("SELECT id, rol, activo FROM usuarios WHERE nombre = :n"),
+            {"n": "Barra"},
+        ).first()
+
+        # Generamos el hash con la misma función que usa el resto del sistema.
+        # Importar aquí evita ciclos al cargar este módulo.
+        from app.routers.auth import hash_pin
+
+        pin_hash = hash_pin("4444")
+        if fila is None:
+            print("[check_db] Creando usuario 'Barra' (rol=barra, PIN 4444)…")
+            conn.execute(
+                text(
+                    "INSERT INTO usuarios (nombre, pin_hash, rol, activo) "
+                    "VALUES (:n, :p, :r, 1)"
+                ),
+                {"n": "Barra", "p": pin_hash, "r": "barra"},
+            )
+            return
+
+        # Existe: nos aseguramos de que el rol sea "barra" y que esté activo.
+        if (fila[1] or "").lower() != "barra" or not fila[2]:
+            print("[check_db] Actualizando rol/activo del usuario 'Barra'…")
+            conn.execute(
+                text(
+                    "UPDATE usuarios SET rol = 'barra', activo = 1 "
+                    "WHERE id = :id"
+                ),
+                {"id": fila[0]},
+            )
+
+
 def _migrar_favoritos_usuario(engine) -> None:
     """Crea la tabla ``favoritos_usuario`` si aún no existe.
 
@@ -571,6 +623,10 @@ def main() -> None:
 
     print("[check_db] Ejecutando create_all…")
     Base.metadata.create_all(bind=engine)
+
+    # Asegurar el usuario "Barra" (PIN 4444) DESPUÉS de create_all para que la
+    # tabla ``usuarios`` exista en bases recién creadas.
+    _seed_usuario_barra(engine)
 
     db = SessionLocal()
     try:

@@ -87,6 +87,9 @@ USUARIOS_INICIALES = [
     {"nombre": "Recepcion", "pin": "1111", "rol": "recepcion"},
     {"nombre": "Mesero", "pin": "2222", "rol": "mesero"},
     {"nombre": "Cocina", "pin": "3333", "rol": "cocina"},
+    # "Barra" comparte la pantalla /cocina.html con un filtro por área:
+    # cocina ve sólo ítems area=cocina, barra ve sólo ítems area=bar.
+    {"nombre": "Barra", "pin": "4444", "rol": "barra"},
 ]
 
 

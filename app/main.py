@@ -68,7 +68,9 @@ app.add_middleware(
 # - reservas / reportes: admin + recepción.
 # - inventario / gastos / personal / cuentas: sólo admin.
 
-_AUTH = [Depends(require_roles("admin", "recepcion", "mesero", "cocina"))]
+_AUTH = [
+    Depends(require_roles("admin", "recepcion", "mesero", "cocina", "barra"))
+]
 _RECEPCION = [Depends(require_roles("admin", "recepcion"))]
 _ADMIN = [Depends(require_roles("admin"))]
 

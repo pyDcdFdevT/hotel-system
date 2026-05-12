@@ -20,6 +20,35 @@ import {
 if (!getToken()) redirectToLogin();
 
 const usuario = getUsuario();
+
+/**
+ * Determina qué área debe consultar el frontend según el rol del usuario.
+ *
+ * - ``cocina`` → ``"cocina"`` (sólo platos)
+ * - ``barra`` → ``"bar"``    (sólo bebidas)
+ * - ``admin``  → ``null``     (todo, sin filtro)
+ *
+ * El backend igualmente fuerza el filtro por rol; este valor sirve sólo
+ * para el query param (admin sí lo puede sobreescribir desde la URL).
+ */
+function calcularAreaFiltro(u) {
+  const rol = (u?.rol || "").toLowerCase();
+  if (rol === "cocina") return "cocina";
+  if (rol === "barra") return "bar";
+  return null;
+}
+const AREA_FILTRO = calcularAreaFiltro(usuario);
+
+const TITULO_POR_AREA = {
+  cocina: "🍳 Pedidos · Cocina",
+  bar: "🍸 Pedidos · Barra",
+};
+const tituloEl = document.querySelector("h1");
+if (tituloEl && AREA_FILTRO && TITULO_POR_AREA[AREA_FILTRO]) {
+  tituloEl.textContent = TITULO_POR_AREA[AREA_FILTRO];
+}
+document.title = AREA_FILTRO === "bar" ? "Hotel · Barra" : "Hotel · Cocina";
+
 document.getElementById("cocina-info").textContent = usuario
   ? `Sesión: ${usuario.nombre} · ${usuario.rol}`
   : "";
@@ -55,7 +84,10 @@ async function authFetch(url, options = {}) {
 
 async function cargarPedidos() {
   try {
-    const res = await authFetch("/api/pedidos/activos-cocina");
+    const qs = AREA_FILTRO
+      ? `?area=${encodeURIComponent(AREA_FILTRO)}`
+      : "";
+    const res = await authFetch(`/api/pedidos/activos-cocina${qs}`);
     if (!res.ok) {
       console.warn("Error cargando pedidos", res.status);
       return;

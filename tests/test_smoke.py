@@ -2141,3 +2141,179 @@ def test_favorito_producto_inactivo_rechazado(client):
         "/api/productos/favoritos", json={"producto_id": insumo["id"]}
     )
     assert resp.status_code == 400, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Usuario "Barra" + filtro por área en /pedidos/activos-cocina
+# ---------------------------------------------------------------------------
+def test_barra_existe_y_login_funciona(anon_client):
+    """El usuario seed 'Barra' (PIN 4444) puede loguearse y tiene rol 'barra'."""
+    resp = anon_client.post("/api/auth/login", json={"pin": "4444"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["usuario"]["rol"] == "barra"
+    assert body["usuario"]["nombre"] == "Barra"
+
+
+def test_activos_cocina_filtra_por_rol(anon_client):
+    """``cocina`` y ``barra`` ven sólo los detalles que les corresponden.
+
+    Crea un pedido con un ítem de cocina (Tequeños) y otro de bar (Cerveza),
+    luego verifica que cada rol sólo ve los ítems de su área.
+    """
+    admin = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()
+    H_admin = {"Authorization": f"Bearer {admin['token']}"}
+
+    productos = anon_client.get("/api/productos/", headers=H_admin).json()
+    prod_cocina = next(
+        p for p in productos
+        if (p.get("area") or "").lower() == "cocina"
+        and p["activo"] and p["es_para_venta"]
+        and float(p.get("stock_actual", 0)) > 0
+    )
+    prod_bar = next(
+        p for p in productos
+        if (p.get("area") or "").lower() == "bar"
+        and p["activo"] and p["es_para_venta"]
+        and float(p.get("stock_actual", 0)) > 0
+    )
+
+    pedido = anon_client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Mesa Mixta Roles",
+            "items": [
+                {"producto_id": prod_cocina["id"], "cantidad": 1},
+                {"producto_id": prod_bar["id"], "cantidad": 1},
+            ],
+        },
+        headers=H_admin,
+    ).json()
+
+    # Cocina (rol cocina) sólo ve el ítem de cocina.
+    cocina = anon_client.post("/api/auth/login", json={"pin": "3333"}).json()
+    H_coc = {"Authorization": f"Bearer {cocina['token']}"}
+    cola_coc = anon_client.get(
+        "/api/pedidos/activos-cocina", headers=H_coc
+    ).json()
+    mi_pedido_coc = next((p for p in cola_coc if p["id"] == pedido["id"]), None)
+    assert mi_pedido_coc, "El pedido debería aparecer para cocina"
+    nombres_coc = {d["producto_nombre"] for d in mi_pedido_coc["detalles"]}
+    assert prod_cocina["nombre"] in nombres_coc
+    assert prod_bar["nombre"] not in nombres_coc, (
+        "Cocina no debería ver ítems de bar"
+    )
+
+    # Barra (rol barra) sólo ve el ítem de bar.
+    barra = anon_client.post("/api/auth/login", json={"pin": "4444"}).json()
+    H_bar = {"Authorization": f"Bearer {barra['token']}"}
+    cola_bar = anon_client.get(
+        "/api/pedidos/activos-cocina", headers=H_bar
+    ).json()
+    mi_pedido_bar = next((p for p in cola_bar if p["id"] == pedido["id"]), None)
+    assert mi_pedido_bar, "El pedido debería aparecer para barra"
+    nombres_bar = {d["producto_nombre"] for d in mi_pedido_bar["detalles"]}
+    assert prod_bar["nombre"] in nombres_bar
+    assert prod_cocina["nombre"] not in nombres_bar, (
+        "Barra no debería ver ítems de cocina"
+    )
+
+
+def test_activos_cocina_admin_puede_filtrar(client):
+    """El admin puede usar ``?area=cocina`` o ``?area=bar`` manualmente."""
+    productos = client.get("/api/productos/").json()
+    prod_cocina = next(
+        p for p in productos
+        if (p.get("area") or "").lower() == "cocina"
+        and p["activo"] and p["es_para_venta"]
+        and float(p.get("stock_actual", 0)) > 0
+    )
+    prod_bar = next(
+        p for p in productos
+        if (p.get("area") or "").lower() == "bar"
+        and p["activo"] and p["es_para_venta"]
+        and float(p.get("stock_actual", 0)) > 0
+    )
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Mesa Admin Filtro",
+            "items": [
+                {"producto_id": prod_cocina["id"], "cantidad": 1},
+                {"producto_id": prod_bar["id"], "cantidad": 1},
+            ],
+        },
+    ).json()
+
+    # ?area=cocina → sólo el ítem de cocina.
+    r_coc = client.get("/api/pedidos/activos-cocina?area=cocina").json()
+    mi = next(p for p in r_coc if p["id"] == pedido["id"])
+    assert {d["producto_nombre"] for d in mi["detalles"]} == {prod_cocina["nombre"]}
+
+    # ?area=bar → sólo el ítem de bar.
+    r_bar = client.get("/api/pedidos/activos-cocina?area=bar").json()
+    mi = next(p for p in r_bar if p["id"] == pedido["id"])
+    assert {d["producto_nombre"] for d in mi["detalles"]} == {prod_bar["nombre"]}
+
+    # sin filtro → todos los detalles.
+    r_all = client.get("/api/pedidos/activos-cocina").json()
+    mi = next(p for p in r_all if p["id"] == pedido["id"])
+    nombres = {d["producto_nombre"] for d in mi["detalles"]}
+    assert prod_cocina["nombre"] in nombres
+    assert prod_bar["nombre"] in nombres
+
+    # Área inválida → 400.
+    r_400 = client.get("/api/pedidos/activos-cocina?area=hangar")
+    assert r_400.status_code == 400, r_400.text
+
+
+def test_barra_puede_marcar_listo(anon_client):
+    """El rol 'barra' puede marcar ítems como 'en_preparacion' y 'listo'.
+
+    Igual que cocina, pero sobre ítems de bar.
+    """
+    admin = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()
+    H_admin = {"Authorization": f"Bearer {admin['token']}"}
+    productos = anon_client.get("/api/productos/", headers=H_admin).json()
+    prod_bar = next(
+        p for p in productos
+        if (p.get("area") or "").lower() == "bar"
+        and p["activo"] and p["es_para_venta"]
+        and float(p.get("stock_actual", 0)) > 0
+    )
+    pedido = anon_client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "bar",
+            "mesa": "Mesa Barra Roles",
+            "items": [{"producto_id": prod_bar["id"], "cantidad": 1}],
+        },
+        headers=H_admin,
+    ).json()
+    det_id = pedido["detalles"][0]["id"]
+
+    barra = anon_client.post("/api/auth/login", json={"pin": "4444"}).json()
+    H_bar = {"Authorization": f"Bearer {barra['token']}"}
+
+    r1 = anon_client.put(
+        f"/api/pedidos/{pedido['id']}/detalles/{det_id}/estado",
+        json={"estado": "en_preparacion"},
+        headers=H_bar,
+    )
+    assert r1.status_code == 200, r1.text
+    r2 = anon_client.put(
+        f"/api/pedidos/{pedido['id']}/detalles/{det_id}/estado",
+        json={"estado": "listo"},
+        headers=H_bar,
+    )
+    assert r2.status_code == 200, r2.text
+    # Pero barra NO puede entregar (eso es del mesero).
+    r3 = anon_client.put(
+        f"/api/pedidos/{pedido['id']}/detalles/{det_id}/estado",
+        json={"estado": "entregado"},
+        headers=H_bar,
+    )
+    assert r3.status_code == 403, r3.text
