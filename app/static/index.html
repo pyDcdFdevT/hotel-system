@@ -718,6 +718,20 @@
               <h2 class="text-lg font-semibold">Catálogo</h2>
               <input id="pos-busqueda" placeholder="Buscar producto..." class="border rounded px-2 py-1 text-sm w-56" />
             </div>
+            <!-- Filtro por área: cocina / bar / todos. La preferencia se
+                 persiste en localStorage. Sólo afecta a la vista del
+                 catálogo (favoritos y carrito no se ven afectados). -->
+            <div class="pos-area-filtro" role="group" aria-label="Filtrar por área">
+              <button id="pos-filtro-todos" type="button" class="pos-area-btn" data-area="todos">
+                🍽️ Todos
+              </button>
+              <button id="pos-filtro-cocina" type="button" class="pos-area-btn" data-area="cocina">
+                🍔 Cocina
+              </button>
+              <button id="pos-filtro-bar" type="button" class="pos-area-btn" data-area="bar">
+                🍸 Bar
+              </button>
+            </div>
             <div id="pos-categorias" class="pos-categorias-container"></div>
           </div>
         </div>

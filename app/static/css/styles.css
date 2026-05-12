@@ -465,6 +465,40 @@ th {
   font-weight: 600;
 }
 
+/* ----- Filtro por área (cocina / bar / todos) en el POS ----- */
+.pos-area-filtro {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.pos-area-btn {
+  flex: 1 1 0;
+  min-width: 7rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #cbd5e1;
+  background-color: #f1f5f9;
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease, transform 0.1s ease;
+}
+.pos-area-btn:hover {
+  background-color: #e2e8f0;
+  color: #1e293b;
+}
+.pos-area-btn.active {
+  background-color: #2563eb;
+  color: #ffffff;
+  border-color: #1d4ed8;
+}
+.pos-area-btn.active:hover {
+  background-color: #1d4ed8;
+}
+
 /* Contenedor con scroll para el acordeón de categorías en POS. */
 .pos-categorias-container {
   max-height: 60vh;

@@ -28,12 +28,17 @@ const CATEGORIAS_ORDEN = [
   "Cockeles",
 ];
 
+const AREAS_VALIDAS = new Set(["todos", "cocina", "bar"]);
+const AREA_FILTRO_KEY = "hotel-pos-area-filtro";
+
 const state = {
   productos: [],
   porCategoria: new Map(),
-  favoritos: [],         // favoritos REALES del usuario (POST/DELETE)
-  favoritosIds: new Set(), // ids de los favoritos REALES (no incluye fallback)
-  favoritosFallback: [], // sugerencias (top-vendidos) cuando no hay favoritos
+  favoritos: [],         // favoritos del usuario (POST/DELETE)
+  favoritosIds: new Set(), // ids de los favoritos del usuario
+  // Filtro de área en el catálogo: "todos" | "cocina" | "bar". No afecta
+  // a la lista de favoritos ni al carrito, sólo al render del catálogo.
+  areaFiltro: "todos",
   carrito: new Map(),
   pedidoActivo: null,
   mesaActiva: null,
@@ -55,10 +60,21 @@ try {
   /* localStorage no disponible */
 }
 
+// Restaurar la preferencia de filtro por área del POS.
+try {
+  const guardado = localStorage.getItem(AREA_FILTRO_KEY);
+  if (guardado && AREAS_VALIDAS.has(guardado)) state.areaFiltro = guardado;
+} catch (_) {
+  /* localStorage no disponible */
+}
+
 const els = {
   busqueda: document.getElementById("pos-busqueda"),
   favoritos: document.getElementById("pos-favoritos"),
   categorias: document.getElementById("pos-categorias"),
+  filtroTodos: document.getElementById("pos-filtro-todos"),
+  filtroCocina: document.getElementById("pos-filtro-cocina"),
+  filtroBar: document.getElementById("pos-filtro-bar"),
   cuentasLista: document.getElementById("pos-cuentas-lista"),
   cuentasCount: document.getElementById("pos-cuentas-count"),
   btnNuevaMesa: document.getElementById("pos-btn-nueva-mesa"),
@@ -105,6 +121,15 @@ let horaTimer = null;
 
 export async function initPedidos() {
   if (els.busqueda) els.busqueda.addEventListener("input", renderCatalogo);
+  // Filtro por área del catálogo (cocina / bar / todos).
+  for (const btn of [els.filtroTodos, els.filtroCocina, els.filtroBar]) {
+    if (btn) {
+      btn.addEventListener("click", () =>
+        cambiarAreaFiltro(btn.dataset.area || "todos"),
+      );
+    }
+  }
+  sincronizarBotonesAreaFiltro();
   if (els.btnNuevaMesa)
     els.btnNuevaMesa.addEventListener("click", abrirNuevaMesa);
   if (els.btnNuevaHabitacion)
@@ -242,36 +267,18 @@ function indexarPorCategoria() {
 }
 
 /**
- * Carga los favoritos del usuario actual.
+ * Carga los favoritos del usuario actual desde el backend.
  *
- * Distingue dos listas:
- *  - ``state.favoritos`` / ``state.favoritosIds``: los favoritos REALES del
- *    usuario (los que ha marcado con ⭐). Sólo estos pueden quitarse.
- *  - ``state.favoritosFallback``: sugerencias (top vendidos) que se muestran
- *    SÓLO cuando el usuario aún no ha marcado ninguno. No cuentan como
- *    favoritos reales (no se incluyen en ``favoritosIds``), por lo que el
- *    catálogo sigue mostrando el botón "＋⭐" para esos productos.
+ * Sólo muestra los favoritos REALES (los que el usuario marcó con ⭐). Si
+ * la lista viene vacía, ``renderFavoritos`` muestra un mensaje invitando
+ * a marcar productos desde el catálogo.
  */
 async function cargarFavoritos() {
   if (!els.favoritos) return;
   try {
     const propios = await get("/productos/favoritos/mis-favoritos");
-    if (Array.isArray(propios) && propios.length) {
-      state.favoritos = propios;
-      state.favoritosIds = new Set(propios.map((p) => p.id));
-      state.favoritosFallback = [];
-    } else {
-      // Aún no hay favoritos reales: cargamos sugerencias para no dejar la
-      // sección vacía, pero NO las contamos como favoritos del usuario.
-      state.favoritos = [];
-      state.favoritosIds = new Set();
-      try {
-        const top = await get("/productos/favoritos?limit=10");
-        state.favoritosFallback = Array.isArray(top) ? top : [];
-      } catch (_) {
-        state.favoritosFallback = [];
-      }
-    }
+    state.favoritos = Array.isArray(propios) ? propios : [];
+    state.favoritosIds = new Set(state.favoritos.map((p) => p.id));
     persistirFavoritosLocal();
     renderFavoritos();
     renderCatalogo();
@@ -299,29 +306,15 @@ function persistirFavoritosLocal() {
 function renderFavoritos() {
   if (!els.favoritos) return;
 
-  // Caso 1: el usuario tiene favoritos reales → mostrar con botón "✖ quitar".
-  if (state.favoritos.length) {
-    els.favoritos.innerHTML = state.favoritos
-      .map((p) => productoButtonHtml(p, "favorito"))
-      .join("");
-    enlazarBotonesFavoritos(els.favoritos);
+  if (!state.favoritos.length) {
+    els.favoritos.innerHTML = `<div class="empty-state">No tienes favoritos. Haz clic en ⭐ en cualquier producto para agregarlo.</div>`;
     return;
   }
 
-  // Caso 2: vacío + hay sugerencias → mostrarlas con botón "＋⭐ agregar".
-  if (state.favoritosFallback.length) {
-    els.favoritos.innerHTML = `
-      <p class="text-xs text-slate-500 mb-2">
-        Sugerencias del top vendidos · marca tus propios favoritos con ⭐
-      </p>
-      ${state.favoritosFallback.map((p) => productoButtonHtml(p, "catalogo")).join("")}
-    `;
-    enlazarBotonesFavoritos(els.favoritos);
-    return;
-  }
-
-  // Caso 3: nada que mostrar.
-  els.favoritos.innerHTML = `<div class="empty-state">Aún no hay productos favoritos. Marca uno con ⭐ desde el catálogo.</div>`;
+  els.favoritos.innerHTML = state.favoritos
+    .map((p) => productoButtonHtml(p, "favorito"))
+    .join("");
+  enlazarBotonesFavoritos(els.favoritos);
 }
 
 /**
@@ -367,13 +360,11 @@ async function agregarAFavoritos(productoId) {
     const producto = await post("/productos/favoritos", {
       producto_id: productoId,
     });
-    // El backend devuelve el producto completo (idempotente). Si falla, lanzará.
     const prod =
       producto && typeof producto === "object" && producto.id
         ? producto
         : state.productos.find((p) => p.id === productoId);
     if (!prod) {
-      // No deberíamos llegar aquí, pero por seguridad refrescamos.
       await cargarFavoritos();
       return;
     }
@@ -383,11 +374,6 @@ async function agregarAFavoritos(productoId) {
       prod,
     ];
     state.favoritosIds.add(prod.id);
-    // Si estaba en la lista de sugerencias, la removemos para no duplicar.
-    state.favoritosFallback = state.favoritosFallback.filter(
-      (p) => p.id !== prod.id,
-    );
-
     persistirFavoritosLocal();
     renderFavoritos();
     renderCatalogo();
@@ -400,42 +386,25 @@ async function agregarAFavoritos(productoId) {
 /**
  * Quita un producto de los favoritos del usuario actual.
  *
- * - Mutamos ``state.favoritos`` / ``state.favoritosIds`` localmente.
- * - Si el usuario se queda sin favoritos reales, recargamos las sugerencias
- *   (top-vendidos) para no dejar la sección vacía, pero seguimos sin
- *   contarlas como favoritos del usuario.
+ * Mutamos ``state.favoritos`` / ``state.favoritosIds`` localmente y
+ * re-renderizamos. Si la respuesta del backend falla, hacemos rollback
+ * para no quedar inconsistentes.
  */
 async function quitarDeFavoritos(productoId) {
-  // Snapshot por si el backend falla y debemos restaurar.
   const snapshot = {
     favs: [...state.favoritos],
     ids: new Set(state.favoritosIds),
   };
 
+  const removido =
+    state.favoritos.find((p) => p.id === productoId) ||
+    state.productos.find((p) => p.id === productoId);
+
   try {
     await deleteApi(`/productos/favoritos/${productoId}`);
-
-    const removido =
-      state.favoritos.find((p) => p.id === productoId) ||
-      state.productos.find((p) => p.id === productoId);
-
     state.favoritos = state.favoritos.filter((p) => p.id !== productoId);
     state.favoritosIds.delete(productoId);
     persistirFavoritosLocal();
-
-    // Si quedó vacía, traemos sugerencias para que el panel no se quede en
-    // blanco, pero NO las agregamos a ``favoritosIds``.
-    if (state.favoritos.length === 0) {
-      try {
-        const top = await get("/productos/favoritos?limit=10");
-        state.favoritosFallback = Array.isArray(top)
-          ? top.filter((p) => p.id !== productoId)
-          : [];
-      } catch (_) {
-        state.favoritosFallback = [];
-      }
-    }
-
     renderFavoritos();
     renderCatalogo();
     showToast(
@@ -454,6 +423,47 @@ async function quitarDeFavoritos(productoId) {
   }
 }
 
+/**
+ * Cambia el filtro de área del catálogo y persiste la preferencia.
+ *
+ * Sólo afecta a la vista del catálogo: favoritos y carrito siguen igual.
+ */
+function cambiarAreaFiltro(area) {
+  const normalizado = AREAS_VALIDAS.has(area) ? area : "todos";
+  if (state.areaFiltro === normalizado) return;
+  state.areaFiltro = normalizado;
+  try {
+    localStorage.setItem(AREA_FILTRO_KEY, normalizado);
+  } catch (_) {
+    /* localStorage no disponible */
+  }
+  sincronizarBotonesAreaFiltro();
+  renderCatalogo();
+}
+
+/** Refleja en los botones del filtro cuál está activo. */
+function sincronizarBotonesAreaFiltro() {
+  const botones = [els.filtroTodos, els.filtroCocina, els.filtroBar];
+  for (const btn of botones) {
+    if (!btn) continue;
+    const area = btn.dataset.area || "todos";
+    btn.classList.toggle("active", area === state.areaFiltro);
+    btn.setAttribute("aria-pressed", area === state.areaFiltro ? "true" : "false");
+  }
+}
+
+/**
+ * Indica si un producto pasa el filtro de área actual.
+ *
+ * El filtro compara contra ``producto.area`` (cocina, bar, piscina, …).
+ * Cuando ``state.areaFiltro === "todos"`` deja pasar todo.
+ */
+function pasaFiltroArea(producto) {
+  if (state.areaFiltro === "todos") return true;
+  const area = String(producto.area || "").toLowerCase();
+  return area === state.areaFiltro;
+}
+
 function renderCatalogo() {
   if (!els.categorias) return;
   const filtro = (els.busqueda?.value || "").trim().toLowerCase();
@@ -470,6 +480,7 @@ function renderCatalogo() {
   for (const cat of categoriasUsadas) {
     const productos = state.porCategoria
       .get(cat)
+      .filter(pasaFiltroArea)
       .filter((p) => !filtro || p.nombre.toLowerCase().includes(filtro));
     if (!productos.length) continue;
     const open = filtro ? "open" : "";
@@ -485,9 +496,18 @@ function renderCatalogo() {
       </details>
     `);
   }
+
+  const mensajeVacio = filtro
+    ? `Sin productos para "${filtro}"`
+    : state.areaFiltro === "cocina"
+      ? "Sin productos de cocina"
+      : state.areaFiltro === "bar"
+        ? "Sin productos de bar"
+        : "Sin productos disponibles";
+
   els.categorias.innerHTML =
     partes.join("") ||
-    `<div class="empty-state">Sin productos para "${filtro}"</div>`;
+    `<div class="empty-state">${mensajeVacio}</div>`;
 
   // Reusa el mismo cableado que el panel de favoritos: click principal → al
   // carrito; click en ＋⭐ / ✖ → toggle de favorito (con stopPropagation).
