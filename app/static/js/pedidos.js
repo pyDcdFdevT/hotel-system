@@ -32,6 +32,7 @@ const state = {
   productos: [],
   porCategoria: new Map(),
   favoritos: [],
+  favoritosIds: new Set(),
   carrito: new Map(),
   pedidoActivo: null,
   mesaActiva: null,
@@ -43,6 +44,15 @@ const state = {
   tasas: { bcv: 405.35, paralelo: 415.0 },
   tasaTipo: "bcv",
 };
+
+// Restaurar ids favoritos del localStorage (para que el catálogo no parpadee
+// al cargar antes de que llegue la respuesta del backend).
+try {
+  const cache = JSON.parse(localStorage.getItem("hotel-pos-favoritos-ids") || "[]");
+  if (Array.isArray(cache)) state.favoritosIds = new Set(cache);
+} catch (_) {
+  /* localStorage no disponible */
+}
 
 const els = {
   busqueda: document.getElementById("pos-busqueda"),
@@ -69,9 +79,12 @@ const els = {
   modalNuevaMesa: document.getElementById("modal-nueva-mesa"),
   formNuevaMesa: document.getElementById("form-nueva-mesa"),
   nuevaMesaCancelar: document.getElementById("nueva-mesa-cancelar"),
-  reservaSelect: document.getElementById("pos-reserva"),
-  bloqueMesa: document.getElementById("nueva-mesa-bloque-mesa"),
-  bloqueHabitacion: document.getElementById("nueva-mesa-bloque-habitacion"),
+  nuevaMesaInput: document.getElementById("nueva-mesa-input"),
+  nuevaMesaHint: document.getElementById("nueva-mesa-hint"),
+
+  modalNuevaHabitacion: document.getElementById("modal-nueva-habitacion"),
+  formNuevaHabitacion: document.getElementById("form-nueva-habitacion"),
+  nuevaHabitacionCancelar: document.getElementById("nueva-habitacion-cancelar"),
   inputHabitacion: document.getElementById("pos-input-habitacion"),
   habitacionesList: document.getElementById("pos-habitaciones-list"),
 
@@ -92,17 +105,20 @@ let horaTimer = null;
 export async function initPedidos() {
   if (els.busqueda) els.busqueda.addEventListener("input", renderCatalogo);
   if (els.btnNuevaMesa)
-    els.btnNuevaMesa.addEventListener("click", () => abrirNuevaMesa("mesa"));
+    els.btnNuevaMesa.addEventListener("click", abrirNuevaMesa);
   if (els.btnNuevaHabitacion)
-    els.btnNuevaHabitacion.addEventListener("click", () =>
-      abrirNuevaMesa("habitacion"),
-    );
+    els.btnNuevaHabitacion.addEventListener("click", abrirNuevaHabitacion);
   if (els.btnCancelarCuenta)
     els.btnCancelarCuenta.addEventListener("click", cancelarCuentaActiva);
   if (els.btnAparcar) els.btnAparcar.addEventListener("click", aparcarCuenta);
   if (els.nuevaMesaCancelar)
     els.nuevaMesaCancelar.addEventListener("click", cerrarNuevaMesa);
-  if (els.formNuevaMesa) els.formNuevaMesa.addEventListener("submit", crearNuevaMesa);
+  if (els.formNuevaMesa)
+    els.formNuevaMesa.addEventListener("submit", crearNuevaMesa);
+  if (els.nuevaHabitacionCancelar)
+    els.nuevaHabitacionCancelar.addEventListener("click", cerrarNuevaHabitacion);
+  if (els.formNuevaHabitacion)
+    els.formNuevaHabitacion.addEventListener("submit", crearNuevaHabitacion);
   if (els.btnRefrescarFavs) els.btnRefrescarFavs.addEventListener("click", cargarFavoritos);
   if (els.btnVaciar) els.btnVaciar.addEventListener("click", vaciarCarrito);
   if (els.btnCobrar) els.btnCobrar.addEventListener("click", abrirModalPago);
@@ -119,12 +135,6 @@ export async function initPedidos() {
   document.addEventListener("tasas:actualizadas", actualizarTasasCache);
 
   restaurarLocal();
-
-  if (els.formNuevaMesa) {
-    els.formNuevaMesa
-      .querySelectorAll('input[name="modo"]')
-      .forEach((radio) => radio.addEventListener("change", actualizarModoNuevaMesa));
-  }
 
   await Promise.all([
     cargarTasas(),
@@ -230,11 +240,35 @@ function indexarPorCategoria() {
   }
 }
 
+/**
+ * Carga los favoritos del usuario actual (POST/PUT/DELETE granulares).
+ * Si la API devuelve vacío, hace fallback a /productos/favoritos (top
+ * vendidos) para que la sección no quede vacía la primera vez.
+ */
 async function cargarFavoritos() {
   if (!els.favoritos) return;
   try {
-    state.favoritos = await get("/productos/favoritos?limit=10");
+    const propios = await get("/productos/favoritos/mis-favoritos");
+    if (Array.isArray(propios) && propios.length) {
+      state.favoritos = propios;
+      state.favoritosIds = new Set(propios.map((p) => p.id));
+    } else {
+      // Primera vez: caemos a top-vendidos para no mostrar pantalla vacía.
+      const top = await get("/productos/favoritos?limit=10");
+      state.favoritos = Array.isArray(top) ? top : [];
+      state.favoritosIds = new Set(state.favoritos.map((p) => p.id));
+    }
+    // Persistimos los ids favoritos para uso offline mientras se navega.
+    try {
+      localStorage.setItem(
+        "hotel-pos-favoritos-ids",
+        JSON.stringify([...state.favoritosIds]),
+      );
+    } catch (_) {
+      /* localStorage puede fallar en privado */
+    }
     renderFavoritos();
+    renderCatalogo();
   } catch (error) {
     console.warn("Favoritos no disponibles", error);
   }
@@ -243,17 +277,55 @@ async function cargarFavoritos() {
 function renderFavoritos() {
   if (!els.favoritos) return;
   if (!state.favoritos.length) {
-    els.favoritos.innerHTML = `<div class="empty-state">Aún no hay productos favoritos</div>`;
+    els.favoritos.innerHTML = `<div class="empty-state">Aún no hay productos favoritos. Marca uno con ⭐ desde el catálogo.</div>`;
     return;
   }
   els.favoritos.innerHTML = state.favoritos
     .map((p) => productoButtonHtml(p, true))
     .join("");
+  // Click principal: agregar al carrito. Click en el botón "Quitar" elimina.
   els.favoritos.querySelectorAll(".pos-prod-btn").forEach((btn) =>
-    btn.addEventListener("click", () =>
-      agregarAlCarrito(Number(btn.dataset.id)),
-    ),
+    btn.addEventListener("click", (ev) => {
+      if (ev.target?.closest?.(".btn-quitar-fav")) return;
+      agregarAlCarrito(Number(btn.dataset.id));
+    }),
   );
+  els.favoritos.querySelectorAll(".btn-quitar-fav").forEach((btn) =>
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const pid = Number(btn.dataset.id);
+      await quitarDeFavoritos(pid);
+    }),
+  );
+  els.favoritos.querySelectorAll(".btn-agregar-fav").forEach((btn) =>
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const pid = Number(btn.dataset.id);
+      await agregarAFavoritos(pid);
+    }),
+  );
+}
+
+/** Agrega un producto a los favoritos del usuario actual. */
+async function agregarAFavoritos(productoId) {
+  try {
+    await post("/productos/favoritos", { producto_id: productoId });
+    showToast("⭐ Agregado a favoritos", "success");
+    await cargarFavoritos();
+  } catch (error) {
+    showToast(`Error agregando favorito: ${error.message}`, "error");
+  }
+}
+
+/** Quita un producto de los favoritos del usuario actual. */
+async function quitarDeFavoritos(productoId) {
+  try {
+    await deleteApi(`/productos/favoritos/${productoId}`);
+    showToast("Producto quitado de favoritos", "info");
+    await cargarFavoritos();
+  } catch (error) {
+    showToast(`Error quitando favorito: ${error.message}`, "error");
+  }
 }
 
 function renderCatalogo() {
@@ -292,22 +364,60 @@ function renderCatalogo() {
     `<div class="empty-state">Sin productos para "${filtro}"</div>`;
 
   els.categorias.querySelectorAll(".pos-prod-btn").forEach((btn) =>
-    btn.addEventListener("click", () =>
-      agregarAlCarrito(Number(btn.dataset.id)),
-    ),
+    btn.addEventListener("click", (ev) => {
+      // Si el click viene de un sub-botón (⭐), no agregar al carrito.
+      if (ev.target?.closest?.(".pos-fav-toggle")) return;
+      agregarAlCarrito(Number(btn.dataset.id));
+    }),
+  );
+  els.categorias.querySelectorAll(".btn-agregar-fav").forEach((btn) =>
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      await agregarAFavoritos(Number(btn.dataset.id));
+    }),
+  );
+  els.categorias.querySelectorAll(".btn-quitar-fav").forEach((btn) =>
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      await quitarDeFavoritos(Number(btn.dataset.id));
+    }),
   );
 }
 
+/**
+ * Renderiza un botón de producto.
+ *
+ * @param {object} p - producto
+ * @param {boolean} esFavorito - si true, muestra el botón "Quitar"; si false
+ *   y el producto NO está en favoritos del usuario, muestra "+ Favorito".
+ */
 function productoButtonHtml(p, esFavorito) {
   const badge = p.porcion ? `<span class="pos-prod-badge">${p.porcion}</span>` : "";
-  const star = esFavorito ? "⭐ " : "";
+  const enFavs = esFavorito || state.favoritosIds.has(p.id);
+  const star = enFavs ? "⭐ " : "";
+  const accionFav = esFavorito
+    ? `<button class="btn-quitar-fav pos-fav-toggle" data-id="${p.id}" title="Quitar de favoritos" type="button">✖</button>`
+    : enFavs
+      ? ""
+      : `<button class="btn-agregar-fav pos-fav-toggle" data-id="${p.id}" title="Agregar a favoritos" type="button">＋⭐</button>`;
   return `
-    <button data-id="${p.id}" class="pos-prod-btn">
+    <button data-id="${p.id}" class="pos-prod-btn" type="button">
       ${badge}
-      <span class="pos-prod-name">${star}${p.nombre}</span>
+      <span class="pos-prod-name">${star}${escapeHtmlPos(p.nombre)}</span>
       <span class="pos-prod-price">${formatUsd(p.precio_usd)} · ${formatBs(p.precio_bs)}</span>
+      ${accionFav}
     </button>
   `;
+}
+
+function escapeHtmlPos(v) {
+  if (v == null) return "";
+  return String(v)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // --------------------------------------------------------------------------
@@ -362,16 +472,56 @@ function renderCuentasPendientes() {
   );
 }
 
-function abrirNuevaMesa(modoInicial = "mesa") {
+function abrirNuevaMesa() {
   els.formNuevaMesa?.reset();
-  if (els.formNuevaMesa) {
-    const radio = els.formNuevaMesa.querySelector(
-      `input[name="modo"][value="${modoInicial}"]`,
-    );
-    if (radio) radio.checked = true;
-  }
-  actualizarModoNuevaMesa();
+  actualizarHintNuevaMesa("");
   els.modalNuevaMesa?.classList.remove("hidden");
+  // Foco automático en el único campo del modal.
+  setTimeout(() => els.nuevaMesaInput?.focus(), 50);
+}
+
+function abrirNuevaHabitacion() {
+  els.formNuevaHabitacion?.reset();
+  els.modalNuevaHabitacion?.classList.remove("hidden");
+  setTimeout(() => els.inputHabitacion?.focus(), 50);
+}
+
+/**
+ * Devuelve true si ya existe una cuenta activa (estado "abierto") con el
+ * mismo nombre normalizado (lower-case, trim). Se usa para evitar el ida
+ * y vuelta al backend cuando es obvio que es duplicado.
+ */
+function existeMesaDuplicada(nombre) {
+  if (!nombre) return false;
+  const norm = nombre.trim().toLowerCase();
+  return (state.cuentasPendientes || []).some(
+    (c) =>
+      (c.mesa || "").trim().toLowerCase() === norm &&
+      c.estado === "abierto",
+  );
+}
+
+function existeHabitacionDuplicada(numero) {
+  if (!numero) return false;
+  return (state.cuentasPendientes || []).some(
+    (c) =>
+      (c.habitacion_numero || "").trim() === numero.trim() &&
+      c.estado === "abierto",
+  );
+}
+
+function actualizarHintNuevaMesa(mensaje, esError = false) {
+  if (!els.nuevaMesaHint) return;
+  if (!mensaje) {
+    els.nuevaMesaHint.textContent =
+      "El nombre debe ser único entre las cuentas activas.";
+    els.nuevaMesaHint.classList.remove("text-red-600");
+    els.nuevaMesaHint.classList.add("text-slate-500");
+    return;
+  }
+  els.nuevaMesaHint.textContent = mensaje;
+  els.nuevaMesaHint.classList.toggle("text-red-600", esError);
+  els.nuevaMesaHint.classList.toggle("text-slate-500", !esError);
 }
 
 function hayCuentaActiva() {
@@ -445,12 +595,8 @@ function cerrarNuevaMesa() {
   els.modalNuevaMesa?.classList.add("hidden");
 }
 
-function actualizarModoNuevaMesa() {
-  const modo =
-    els.formNuevaMesa?.querySelector('input[name="modo"]:checked')?.value || "mesa";
-  if (els.bloqueMesa) els.bloqueMesa.classList.toggle("hidden", modo !== "mesa");
-  if (els.bloqueHabitacion)
-    els.bloqueHabitacion.classList.toggle("hidden", modo !== "habitacion");
+function cerrarNuevaHabitacion() {
+  els.modalNuevaHabitacion?.classList.add("hidden");
 }
 
 async function cargarHabitaciones() {
@@ -469,47 +615,91 @@ async function cargarHabitaciones() {
   }
 }
 
+/**
+ * Crea una cuenta "mesa / cliente" simplificada.
+ *
+ * Validación: nombre único entre las cuentas activas. La verificación
+ * primaria es local (rápida) pero el backend también rechaza duplicados
+ * con 400 (defensa en profundidad).
+ */
 async function crearNuevaMesa(event) {
   event.preventDefault();
   const formData = new FormData(els.formNuevaMesa);
-  const modo = formData.get("modo")?.toString() || "mesa";
-  const mesa = formData.get("mesa")?.toString().trim() || null;
-  const habitacion = formData.get("habitacion_numero")?.toString().trim() || null;
-
-  // IMPORTANTE: NO borrar otras cuentas. Sólo abrir una nueva en estado local.
-  if (modo === "habitacion") {
-    if (!habitacion) {
-      showToast("Indique el número de habitación", "error");
-      return;
-    }
-    const hab = state.habitaciones.find((h) => h.numero === habitacion);
-    if (!hab) {
-      showToast(`Habitación ${habitacion} no existe`, "error");
-      return;
-    }
-    if (hab.estado === "inhabilitada") {
-      showToast(
-        `La habitación ${habitacion} está inhabilitada y no acepta consumos`,
-        "error",
-      );
-      return;
-    }
-    state.habitacionNumero = habitacion;
-    state.mesaActiva = `Hab ${habitacion}`;
-    state.mesaTipo = "habitacion";
-  } else {
-    if (!mesa) {
-      showToast("Indique mesa o cliente", "error");
-      return;
-    }
-    state.habitacionNumero = null;
-    state.mesaActiva = mesa;
-    state.mesaTipo = formData.get("tipo")?.toString() || "restaurante";
+  const mesa = formData.get("mesa")?.toString().trim() || "";
+  if (!mesa) {
+    actualizarHintNuevaMesa("Indique el nombre de la mesa o cliente", true);
+    return;
   }
-  state.reservaId = Number(formData.get("reserva_id")) || null;
+  // Refrescamos la lista de pendientes para hacer la validación con datos
+  // frescos (otra sesión puede haber creado la mesa entretanto).
+  try {
+    await cargarCuentasPendientes();
+  } catch (_) {
+    /* si falla, seguimos: el backend hará la última validación */
+  }
+  if (existeMesaDuplicada(mesa)) {
+    actualizarHintNuevaMesa(
+      `Ya existe una cuenta activa llamada "${mesa}". Elige otro nombre.`,
+      true,
+    );
+    return;
+  }
+
+  state.habitacionNumero = null;
+  state.mesaActiva = mesa;
+  state.mesaTipo = "restaurante";
+  state.reservaId = null;
   state.pedidoActivo = null;
   state.carrito.clear();
   cerrarNuevaMesa();
+  refrescarUI();
+  showToast(`Cuenta "${mesa}" abierta. Añade productos.`, "info");
+}
+
+/**
+ * Crea una cuenta asociada a una habitación. Se mantiene como flujo
+ * independiente: usa el número de habitación como identificador único.
+ */
+async function crearNuevaHabitacion(event) {
+  event.preventDefault();
+  const formData = new FormData(els.formNuevaHabitacion);
+  const habitacion = formData.get("habitacion_numero")?.toString().trim() || "";
+  if (!habitacion) {
+    showToast("Indique el número de habitación", "error");
+    return;
+  }
+  const hab = state.habitaciones.find((h) => h.numero === habitacion);
+  if (!hab) {
+    showToast(`Habitación ${habitacion} no existe`, "error");
+    return;
+  }
+  if (hab.estado === "inhabilitada") {
+    showToast(
+      `La habitación ${habitacion} está inhabilitada y no acepta consumos`,
+      "error",
+    );
+    return;
+  }
+  try {
+    await cargarCuentasPendientes();
+  } catch (_) {
+    /* si falla seguimos: el backend valida también */
+  }
+  if (existeHabitacionDuplicada(habitacion)) {
+    showToast(
+      `Ya existe una cuenta activa para la habitación ${habitacion}`,
+      "error",
+    );
+    return;
+  }
+
+  state.habitacionNumero = habitacion;
+  state.mesaActiva = `Hab ${habitacion}`;
+  state.mesaTipo = "habitacion";
+  state.reservaId = null;
+  state.pedidoActivo = null;
+  state.carrito.clear();
+  cerrarNuevaHabitacion();
   refrescarUI();
   showToast(`Cuenta "${state.mesaActiva}" abierta. Añade productos.`, "info");
 }
@@ -643,6 +833,23 @@ function actualizarBannerCuenta() {
   }
 }
 
+/**
+ * Iconos por estado del detalle. Se muestran junto al nombre en el carrito
+ * para que el mesero sepa qué ítems puede entregar.
+ */
+const ESTADO_DETALLE_ICONO = {
+  pendiente: "⏳",
+  en_preparacion: "🔪",
+  listo: "✅",
+  entregado: "✅✅",
+};
+const ESTADO_DETALLE_LABEL = {
+  pendiente: "Pendiente",
+  en_preparacion: "En preparación",
+  listo: "Listo",
+  entregado: "Entregado",
+};
+
 function renderCarrito() {
   if (!els.carrito) return;
   const filasServidor = [];
@@ -650,13 +857,25 @@ function renderCarrito() {
     for (const d of state.pedidoActivo.detalles) {
       const prod = state.productos.find((p) => p.id === d.producto_id);
       const nombre = prod?.nombre || `#${d.producto_id}`;
+      const estado = d.estado || "pendiente";
+      const icono = ESTADO_DETALLE_ICONO[estado] || "⏳";
+      const label = ESTADO_DETALLE_LABEL[estado] || estado;
+      const accion =
+        estado === "listo"
+          ? `<button class="btn-entregar text-xs text-emerald-700 underline" data-detalle-id="${d.id}" title="Marcar como entregado al cliente">Entregar</button>`
+          : estado === "entregado"
+            ? `<span class="text-xs text-slate-400">Entregado</span>`
+            : "";
       filasServidor.push(`
         <tr class="bg-slate-50">
-          <td>${nombre} <span class="text-xs text-slate-500">(guardado)</span></td>
+          <td>
+            ${escapeHtmlPos(nombre)}
+            <span class="text-xs text-slate-500" title="${label}">${icono} ${label}</span>
+          </td>
           <td>${formatUsd(d.precio_unit_usd)}<br><span class="text-xs text-slate-500">${formatBs(d.precio_unit_bs)}</span></td>
           <td>${Number(d.cantidad).toFixed(2)}</td>
           <td>${formatUsd(d.subtotal_usd)}<br><span class="text-xs text-slate-500">${formatBs(d.subtotal_bs)}</span></td>
-          <td></td>
+          <td>${accion}</td>
         </tr>
       `);
     }
@@ -704,12 +923,41 @@ function renderCarrito() {
       quitarDelCarrito(Number(btn.dataset.id)),
     ),
   );
+  els.carrito.querySelectorAll(".btn-entregar").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      marcarDetalleEntregado(Number(btn.dataset.detalleId)),
+    ),
+  );
 
   const { totalBs, totalUsd } = totalesCarrito();
   const servidorBs = Number(state.pedidoActivo?.total_bs || 0);
   const servidorUsd = Number(state.pedidoActivo?.total_usd || 0);
   if (els.totalBs) els.totalBs.textContent = formatBs(totalBs + servidorBs);
   if (els.totalUsd) els.totalUsd.textContent = formatUsd(totalUsd + servidorUsd);
+}
+
+/**
+ * Marca un detalle del pedido activo como ``entregado``.
+ *
+ * Permisos backend: admin, mesero, recepcion. La cocina marca "listo";
+ * quien entrega al cliente cierra el ciclo aquí.
+ */
+async function marcarDetalleEntregado(detalleId) {
+  if (!state.pedidoActivo?.id) return;
+  try {
+    const detalleActualizado = await put(
+      `/pedidos/${state.pedidoActivo.id}/detalles/${detalleId}/estado`,
+      { estado: "entregado" },
+    );
+    // Refrescamos sólo el detalle correspondiente en el pedido activo.
+    const lista = state.pedidoActivo.detalles || [];
+    const idx = lista.findIndex((x) => x.id === detalleId);
+    if (idx >= 0) lista[idx] = { ...lista[idx], ...detalleActualizado };
+    showToast("Producto marcado como entregado ✅", "success");
+    refrescarUI();
+  } catch (error) {
+    showToast(`Error marcando entregado: ${error.message}`, "error");
+  }
 }
 
 // --------------------------------------------------------------------------

@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
@@ -23,8 +24,12 @@ from app.models import (
 from app.routers.auth import get_current_user, require_roles
 from app.schemas import (
     CocinaEstadoUpdate,
+    DetalleCocinaOut,
+    DetalleEstadoUpdate,
+    DetallePedidoOut,
     PedidoAnular,
     PedidoCargoHabitacion,
+    PedidoCocinaOut,
     PedidoCreate,
     PedidoItemsUpdate,
     PedidoOut,
@@ -96,39 +101,178 @@ def listar_activos(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error listando pedidos activos: {exc}") from exc
 
 
+ESTADOS_DETALLE = ("pendiente", "en_preparacion", "listo", "entregado")
+TRANSICIONES_DETALLE = {
+    "pendiente": {"en_preparacion", "listo"},
+    "en_preparacion": {"listo", "pendiente"},
+    "listo": {"entregado", "en_preparacion"},
+    "entregado": set(),
+}
+
+
+def _agregar_estado_pedido(detalles: list[DetallePedido]) -> str:
+    """Calcula el estado agregado del pedido a partir de sus detalles.
+
+    Reglas:
+    * todos ``entregado``  → ``entregado``
+    * todos ``listo`` (o entregado)  → ``listo``
+    * alguno ``en_preparacion``  → ``en_preparacion``
+    * en cualquier otro caso → ``pendiente``
+    """
+    estados = [(d.estado or "pendiente") for d in (detalles or [])]
+    if not estados:
+        return "pendiente"
+    if all(e == "entregado" for e in estados):
+        return "entregado"
+    if all(e in ("listo", "entregado") for e in estados):
+        return "listo"
+    if any(e == "en_preparacion" for e in estados):
+        return "en_preparacion"
+    return "pendiente"
+
+
 @router.get(
     "/activos-cocina",
+    response_model=List[PedidoCocinaOut],
     dependencies=[Depends(require_roles("admin", "cocina"))],
 )
 def listar_pedidos_cocina(db: Session = Depends(get_db)):
-    """Pedidos abiertos pendientes para cocina/bar (sin precios)."""
+    """Pedidos abiertos con al menos un ítem pendiente/en_preparacion.
+
+    Cada pedido devuelve **todos** sus detalles para que la pantalla de
+    cocina pueda gestionarlos individualmente; sólo se filtran del listado
+    los pedidos cuyos detalles están todos en estado ``listo`` o
+    ``entregado`` (ya nada por hacer).
+    """
     pedidos = (
         db.query(Pedido)
         .options(joinedload(Pedido.detalles).joinedload(DetallePedido.producto))
         .filter(Pedido.estado == "abierto")
-        .filter(Pedido.estado_cocina.in_(["pendiente", "en_preparacion"]))
         .order_by(Pedido.fecha.asc())
         .all()
     )
-    return [
-        {
-            "id": p.id,
-            "mesa": p.mesa,
-            "habitacion_numero": p.habitacion_numero,
-            "tipo": p.tipo,
-            "estado_cocina": p.estado_cocina,
-            "fecha": p.fecha.isoformat() if p.fecha else None,
-            "detalles": [
-                {
-                    "cantidad": float(d.cantidad),
-                    "producto_nombre": d.producto.nombre if d.producto else f"#{d.producto_id}",
-                    "area": d.producto.area if d.producto else None,
-                }
-                for d in p.detalles
-            ],
-        }
-        for p in pedidos
-    ]
+    salida: list[PedidoCocinaOut] = []
+    for p in pedidos:
+        # Si todos los detalles ya están listos/entregados, el pedido sale de cocina.
+        if all((d.estado or "pendiente") in ("listo", "entregado") for d in p.detalles):
+            continue
+        salida.append(
+            PedidoCocinaOut(
+                id=p.id,
+                mesa=p.mesa,
+                habitacion_numero=p.habitacion_numero,
+                tipo=p.tipo,
+                estado=p.estado,
+                estado_cocina=_agregar_estado_pedido(list(p.detalles)),
+                fecha=p.fecha,
+                detalles=[
+                    DetalleCocinaOut(
+                        id=d.id,
+                        producto_id=d.producto_id,
+                        producto_nombre=(
+                            d.producto.nombre if d.producto else f"#{d.producto_id}"
+                        ),
+                        cantidad=float(d.cantidad),
+                        area=(d.producto.area if d.producto else None),
+                        categoria=(d.producto.categoria if d.producto else None),
+                        estado=d.estado or "pendiente",
+                        iniciado_en=d.iniciado_en,
+                        listo_en=d.listo_en,
+                    )
+                    for d in p.detalles
+                ],
+            )
+        )
+    return salida
+
+
+@router.get(
+    "/{pedido_id}/detalles",
+    response_model=List[DetallePedidoOut],
+)
+def listar_detalles(pedido_id: int, db: Session = Depends(get_db)):
+    """Devuelve los detalles del pedido con sus estados individuales."""
+    pedido = _cargar_pedido(db, pedido_id)
+    return list(pedido.detalles)
+
+
+@router.put(
+    "/{pedido_id}/detalles/{detalle_id}/estado",
+    response_model=DetallePedidoOut,
+)
+def actualizar_estado_detalle(
+    pedido_id: int,
+    detalle_id: int,
+    data: DetalleEstadoUpdate,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Avanza/retrocede el estado de un detalle.
+
+    Permisos:
+    * ``en_preparacion`` y ``listo`` → admin, cocina (la cocina prepara).
+    * ``entregado`` → admin, mesero, recepcion (quien entrega al cliente).
+    * ``pendiente`` → admin sólo (retroceder es excepcional).
+    """
+    estado = (data.estado or "").strip().lower()
+    if estado not in ESTADOS_DETALLE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Estado inválido. Use: {list(ESTADOS_DETALLE)}",
+        )
+
+    rol = (usuario.rol or "").lower()
+    permitidos_por_estado = {
+        "pendiente": {"admin"},
+        "en_preparacion": {"admin", "cocina"},
+        "listo": {"admin", "cocina"},
+        "entregado": {"admin", "mesero", "recepcion"},
+    }
+    if rol not in permitidos_por_estado.get(estado, set()):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"El rol '{rol}' no puede marcar un ítem como '{estado}'."
+            ),
+        )
+
+    pedido = _cargar_pedido(db, pedido_id)
+    detalle = next((d for d in pedido.detalles if d.id == detalle_id), None)
+    if not detalle:
+        raise HTTPException(status_code=404, detail="Detalle no encontrado")
+
+    estado_actual = (detalle.estado or "pendiente").lower()
+    permitidas = TRANSICIONES_DETALLE.get(estado_actual, set())
+    if estado != estado_actual and estado not in permitidas and rol != "admin":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Transición no permitida: {estado_actual} → {estado}"
+            ),
+        )
+
+    ahora = caracas_now()
+    detalle.estado = estado
+    if estado == "en_preparacion" and not detalle.iniciado_en:
+        detalle.iniciado_en = ahora
+    elif estado == "listo":
+        if not detalle.iniciado_en:
+            detalle.iniciado_en = ahora
+        detalle.listo_en = ahora
+    elif estado == "entregado":
+        if not detalle.iniciado_en:
+            detalle.iniciado_en = ahora
+        if not detalle.listo_en:
+            detalle.listo_en = ahora
+        detalle.entregado_en = ahora
+
+    # Sincronizamos el agregado en Pedido para retro-compatibilidad.
+    pedido.estado_cocina = _agregar_estado_pedido(list(pedido.detalles))
+    pedido.ultima_actividad = ahora
+    pedido.updated_at = utc_now()
+    db.commit()
+    db.refresh(detalle)
+    return detalle
 
 
 @router.put(
@@ -141,14 +285,36 @@ def actualizar_estado_cocina(
     data: CocinaEstadoUpdate,
     db: Session = Depends(get_db),
 ):
-    valid = {"pendiente", "en_preparacion", "listo", "entregado"}
-    if data.estado_cocina not in valid:
+    """Endpoint legado: cambia el estado AGREGADO del pedido.
+
+    Se mantiene por compatibilidad con clientes antiguos, pero el flujo
+    nuevo usa ``PUT /pedidos/{id}/detalles/{detalle_id}/estado`` y
+    actualiza el agregado automáticamente.
+    """
+    if data.estado_cocina not in ESTADOS_DETALLE:
         raise HTTPException(
             status_code=400,
-            detail=f"Estado cocina inválido. Use: {sorted(valid)}",
+            detail=f"Estado cocina inválido. Use: {list(ESTADOS_DETALLE)}",
         )
     pedido = _cargar_pedido(db, pedido_id)
     pedido.estado_cocina = data.estado_cocina
+    # Propagamos a los detalles para mantener consistencia con la
+    # granularidad por ítem (el agregado refleja el peor caso).
+    ahora = caracas_now()
+    for d in pedido.detalles:
+        d.estado = data.estado_cocina
+        if data.estado_cocina == "en_preparacion" and not d.iniciado_en:
+            d.iniciado_en = ahora
+        elif data.estado_cocina == "listo":
+            if not d.iniciado_en:
+                d.iniciado_en = ahora
+            d.listo_en = d.listo_en or ahora
+        elif data.estado_cocina == "entregado":
+            if not d.iniciado_en:
+                d.iniciado_en = ahora
+            if not d.listo_en:
+                d.listo_en = ahora
+            d.entregado_en = d.entregado_en or ahora
     pedido.updated_at = utc_now()
     db.commit()
     db.expire_all()
@@ -188,6 +354,8 @@ def crear_pedido(data: PedidoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"Tipo inválido. Use: {sorted(TIPOS_VALIDOS)}")
 
     habitacion_numero = (data.habitacion_numero or "").strip() or None
+    mesa_nombre = (data.mesa or "").strip() or None
+
     if habitacion_numero:
         habitacion = (
             db.query(Habitacion).filter(Habitacion.numero == habitacion_numero).first()
@@ -202,12 +370,44 @@ def crear_pedido(data: PedidoCreate, db: Session = Depends(get_db)):
                 status_code=400,
                 detail=f"La habitación {habitacion_numero} está inhabilitada y no acepta consumos",
             )
+        # Bloquea crear una segunda cuenta abierta contra la misma habitación.
+        duplicado_hab = (
+            db.query(Pedido)
+            .filter(Pedido.estado == "abierto")
+            .filter(Pedido.habitacion_numero == habitacion_numero)
+            .first()
+        )
+        if duplicado_hab:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Ya existe una cuenta activa para la habitación "
+                    f"{habitacion_numero} (#{duplicado_hab.id})"
+                ),
+            )
+    elif mesa_nombre:
+        # Comparación case-insensitive y sin espacios al borde para evitar
+        # falsos negativos del tipo "Mesa 5" vs "mesa 5".
+        duplicado_mesa = (
+            db.query(Pedido)
+            .filter(Pedido.estado == "abierto")
+            .filter(func.lower(func.trim(Pedido.mesa)) == mesa_nombre.lower())
+            .first()
+        )
+        if duplicado_mesa:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Ya existe una cuenta activa con el nombre "
+                    f"'{mesa_nombre}' (#{duplicado_mesa.id})"
+                ),
+            )
 
     try:
         tasa = obtener_tasa_bcv(db)
         pedido = Pedido(
             tipo=data.tipo,
-            mesa=data.mesa,
+            mesa=mesa_nombre,
             habitacion_numero=habitacion_numero,
             reserva_id=data.reserva_id,
             estado="abierto",

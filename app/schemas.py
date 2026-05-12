@@ -393,6 +393,65 @@ class DetallePedidoOut(ORMModel):
     precio_unit_usd: Decimal
     subtotal_bs: Decimal
     subtotal_usd: Decimal
+    # Flujo cocina/bar por ítem (autoridad por encima de Pedido.estado_cocina).
+    estado: Optional[str] = "pendiente"
+    iniciado_en: Optional[datetime] = None
+    listo_en: Optional[datetime] = None
+    entregado_en: Optional[datetime] = None
+
+
+class DetalleEstadoUpdate(BaseModel):
+    """Payload para ``PUT /pedidos/{id}/detalles/{detalle_id}/estado``."""
+
+    estado: str = Field(..., min_length=3, max_length=20)
+
+
+class DetalleCocinaOut(BaseModel):
+    """Información reducida de un detalle para la pantalla de cocina."""
+
+    id: int
+    producto_id: int
+    producto_nombre: str
+    cantidad: float
+    area: Optional[str] = None
+    categoria: Optional[str] = None
+    estado: str
+    iniciado_en: Optional[datetime] = None
+    listo_en: Optional[datetime] = None
+
+
+class PedidoCocinaOut(BaseModel):
+    """Pedido agrupado para la pantalla cocina (sin precios)."""
+
+    id: int
+    mesa: Optional[str] = None
+    habitacion_numero: Optional[str] = None
+    tipo: str
+    estado: str
+    estado_cocina: str
+    fecha: Optional[datetime] = None
+    detalles: List[DetalleCocinaOut] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Favoritos por usuario
+# ---------------------------------------------------------------------------
+class FavoritoIn(BaseModel):
+    producto_id: int
+
+
+class FavoritoReorden(BaseModel):
+    """Reordenamiento batch: lista de ``producto_id`` en el nuevo orden."""
+
+    producto_ids: List[int] = Field(default_factory=list)
+
+
+class FavoritoOut(ORMModel):
+    id: int
+    usuario_id: int
+    producto_id: int
+    orden: int
+    created_at: datetime
 
 
 class PedidoOut(ORMModel):

@@ -246,6 +246,106 @@ def _migrar_estados_habitaciones(engine) -> None:
                 print(f"[check_db] Aviso insertando habitación {numero}: {exc}")
 
 
+def _migrar_detalles_pedido_estado(engine) -> None:
+    """Añade columnas de estado por ítem a ``detalles_pedido``.
+
+    Permite rastrear el flujo cocina/bar a nivel de detalle:
+    ``pendiente → en_preparacion → listo → entregado``.
+    """
+    if not _is_sqlite(engine):
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existe = conn.execute(
+            text(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='detalles_pedido'"
+            )
+        ).first()
+        if not existe:
+            return
+        info = conn.execute(text("PRAGMA table_info(detalles_pedido)")).fetchall()
+        columnas = {row[1] for row in info}
+        nuevos = (
+            ("estado", "VARCHAR(20) NOT NULL DEFAULT 'pendiente'"),
+            ("iniciado_en", "DATETIME"),
+            ("listo_en", "DATETIME"),
+            ("entregado_en", "DATETIME"),
+        )
+        for nombre, tipo in nuevos:
+            if nombre not in columnas:
+                print(
+                    f"[check_db] Migrando detalles_pedido: añadiendo columna '{nombre}'…"
+                )
+                conn.execute(
+                    text(f"ALTER TABLE detalles_pedido ADD COLUMN {nombre} {tipo}")
+                )
+                columnas.add(nombre)
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_detalles_pedido_estado "
+                "ON detalles_pedido (estado)"
+            )
+        )
+        # Los detalles de pedidos pagados/cargados se asumen entregados.
+        conn.execute(
+            text(
+                "UPDATE detalles_pedido SET estado = 'entregado' "
+                "WHERE estado = 'pendiente' AND pedido_id IN ("
+                "  SELECT id FROM pedidos WHERE estado IN ('pagado', 'cargado')"
+                ")"
+            )
+        )
+
+
+def _migrar_favoritos_usuario(engine) -> None:
+    """Crea la tabla ``favoritos_usuario`` si aún no existe.
+
+    En la práctica ``create_all`` lo hará también, pero ejecutarlo
+    explícitamente aquí facilita ver el progreso en logs (Railway).
+    """
+    if not _is_sqlite(engine):
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        existe = conn.execute(
+            text(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='favoritos_usuario'"
+            )
+        ).first()
+        if existe:
+            return
+        print("[check_db] Creando tabla favoritos_usuario…")
+        conn.execute(
+            text(
+                """
+                CREATE TABLE favoritos_usuario (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+                    producto_id INTEGER NOT NULL REFERENCES productos(id),
+                    orden INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL,
+                    CONSTRAINT uq_favorito_usuario_producto
+                        UNIQUE (usuario_id, producto_id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_favoritos_usuario_usuario_id "
+                "ON favoritos_usuario (usuario_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_favoritos_usuario_producto_id "
+                "ON favoritos_usuario (producto_id)"
+            )
+        )
+
+
 def _migrar_pedidos_habitacion(engine) -> None:
     """Añade columnas a ``pedidos`` (habitación, cocina, anulación, actividad)."""
     if not _is_sqlite(engine):
@@ -464,7 +564,9 @@ def main() -> None:
     _actualizar_precio_habitaciones(engine)
     _migrar_estados_habitaciones(engine)
     _migrar_pedidos_habitacion(engine)
+    _migrar_detalles_pedido_estado(engine)
     _migrar_reservas_vehiculo(engine)
+    _migrar_favoritos_usuario(engine)
     _seed_productos_piscina(engine)
 
     print("[check_db] Ejecutando create_all…")

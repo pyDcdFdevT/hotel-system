@@ -11,14 +11,18 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     DetallePedido,
+    FavoritoUsuario,
     MovimientoInventario,
     Pedido,
     Producto,
     Receta,
+    Usuario,
     caracas_now,
 )
-from app.routers.auth import require_roles
+from app.routers.auth import get_current_user, require_roles
 from app.schemas import (
+    FavoritoIn,
+    FavoritoReorden,
     ProductoCreate,
     ProductoOut,
     ProductoUpdate,
@@ -100,6 +104,148 @@ def productos_favoritos(
         raise HTTPException(
             status_code=500, detail=f"Error listando favoritos: {exc}"
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Favoritos editables por usuario (POS)
+# ---------------------------------------------------------------------------
+@router.get("/favoritos/mis-favoritos", response_model=List[ProductoOut])
+def mis_favoritos(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Productos favoritos del usuario autenticado, en su orden personalizado."""
+    rows = (
+        db.query(FavoritoUsuario, Producto)
+        .join(Producto, FavoritoUsuario.producto_id == Producto.id)
+        .filter(FavoritoUsuario.usuario_id == usuario.id)
+        .filter(Producto.activo.is_(True))
+        .filter(Producto.es_para_venta.is_(True))
+        .order_by(FavoritoUsuario.orden.asc(), FavoritoUsuario.created_at.asc())
+        .all()
+    )
+    return [producto for _fav, producto in rows]
+
+
+@router.post(
+    "/favoritos",
+    response_model=ProductoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def agregar_favorito(
+    data: FavoritoIn,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Agrega un producto a los favoritos del usuario actual.
+
+    Si ya estaba en favoritos, devuelve el producto sin error (idempotente).
+    """
+    producto = (
+        db.query(Producto).filter(Producto.id == data.producto_id).first()
+    )
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    if not producto.activo or not producto.es_para_venta:
+        raise HTTPException(
+            status_code=400,
+            detail="Sólo se pueden marcar como favoritos productos activos y para venta",
+        )
+    existente = (
+        db.query(FavoritoUsuario)
+        .filter(FavoritoUsuario.usuario_id == usuario.id)
+        .filter(FavoritoUsuario.producto_id == producto.id)
+        .first()
+    )
+    if existente:
+        return producto
+
+    # Nuevo favorito al final del orden actual.
+    max_orden = (
+        db.query(func.coalesce(func.max(FavoritoUsuario.orden), -1))
+        .filter(FavoritoUsuario.usuario_id == usuario.id)
+        .scalar()
+    )
+    fav = FavoritoUsuario(
+        usuario_id=usuario.id,
+        producto_id=producto.id,
+        orden=int(max_orden) + 1,
+    )
+    try:
+        db.add(fav)
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # Carrera: ya existía. Idempotente.
+    return producto
+
+
+@router.delete(
+    "/favoritos/{producto_id}",
+    status_code=status.HTTP_200_OK,
+)
+def quitar_favorito(
+    producto_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Quita un producto de los favoritos del usuario actual."""
+    fav = (
+        db.query(FavoritoUsuario)
+        .filter(FavoritoUsuario.usuario_id == usuario.id)
+        .filter(FavoritoUsuario.producto_id == producto_id)
+        .first()
+    )
+    if not fav:
+        # Idempotente: si no existe, devolvemos OK con flag.
+        return {"removed": False, "producto_id": producto_id}
+    db.delete(fav)
+    db.commit()
+    return {"removed": True, "producto_id": producto_id}
+
+
+@router.put("/favoritos/reordenar")
+def reordenar_favoritos(
+    data: FavoritoReorden,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Actualiza el campo ``orden`` de los favoritos del usuario actual.
+
+    El payload contiene ``producto_ids`` en el orden deseado. Cualquier
+    favorito existente no incluido en la lista mantiene su orden actual
+    desplazado al final.
+    """
+    propios = (
+        db.query(FavoritoUsuario)
+        .filter(FavoritoUsuario.usuario_id == usuario.id)
+        .all()
+    )
+    if not propios:
+        return {"updated": 0}
+
+    pid_a_fav = {f.producto_id: f for f in propios}
+    nuevo_orden = 0
+    actualizados = 0
+    for pid in data.producto_ids:
+        fav = pid_a_fav.get(pid)
+        if fav is None:
+            continue
+        if fav.orden != nuevo_orden:
+            fav.orden = nuevo_orden
+            actualizados += 1
+        nuevo_orden += 1
+    # Lo no listado conserva su orden relativo, desplazado al final.
+    restantes = [
+        f for f in propios if f.producto_id not in set(data.producto_ids)
+    ]
+    restantes.sort(key=lambda f: (f.orden, f.created_at))
+    for fav in restantes:
+        if fav.orden != nuevo_orden:
+            fav.orden = nuevo_orden
+            actualizados += 1
+        nuevo_orden += 1
+    db.commit()
+    return {"updated": actualizados}
 
 
 @router.get("/{producto_id}", response_model=ProductoOut)

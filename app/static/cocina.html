@@ -11,7 +11,40 @@
     .ticket { background: #ffffff; color: #0f172a; }
     .ticket.bar { border-left: 8px solid #2563eb; }
     .ticket.cocina { border-left: 8px solid #16a34a; }
-    .ticket.lista { opacity: 0.5; }
+    .ticket.piscina { border-left: 8px solid #0891b2; }
+
+    .detalle-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.5rem;
+      align-items: center;
+      padding: 0.45rem 0;
+      border-bottom: 1px dashed #cbd5e1;
+    }
+    .detalle-row:last-child { border-bottom: none; }
+    .detalle-row.estado-listo { opacity: 0.55; }
+    .detalle-estado {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.15rem 0.45rem;
+      border-radius: 9999px;
+      font-weight: 600;
+    }
+    .badge-pendiente { background: #fde68a; color: #92400e; }
+    .badge-en_preparacion { background: #fdba74; color: #9a3412; }
+    .badge-listo { background: #bbf7d0; color: #166534; }
+    .btn-cocina {
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 0.35rem 0.65rem;
+      border-radius: 0.4rem;
+      color: #ffffff;
+    }
+    .btn-iniciar { background: #f59e0b; }
+    .btn-iniciar:hover { background: #d97706; }
+    .btn-listo { background: #16a34a; }
+    .btn-listo:hover { background: #15803d; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -21,7 +54,8 @@
         <h1 class="text-xl font-bold">🍳 Pedidos · Cocina &amp; Bar</h1>
         <p class="text-xs opacity-70" id="cocina-info"></p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-3">
+        <span id="cocina-resumen" class="text-xs opacity-80"></span>
         <span id="cocina-hora" class="text-xs opacity-70"></span>
         <button id="btn-logout" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm">Salir</button>
       </div>
@@ -32,143 +66,6 @@
     <p id="vacio" class="text-center opacity-60 mt-12 hidden">No hay pedidos pendientes 🎉</p>
   </main>
 
-  <script type="module">
-    import {
-      getToken,
-      getUsuario,
-      clearSession,
-      redirectToLogin,
-      formatTimeVE,
-      nowVE,
-    } from "/static/js/api.js";
-
-    if (!getToken()) redirectToLogin();
-
-    const usuario = getUsuario();
-    document.getElementById("cocina-info").textContent = usuario
-      ? `Sesión: ${usuario.nombre} · ${usuario.rol}`
-      : "";
-
-    async function cargarPedidos() {
-      try {
-        const res = await fetch("/api/pedidos/activos-cocina", {
-          headers: { Authorization: `Bearer ${getToken()}` },
-        });
-        if (res.status === 401) {
-          redirectToLogin();
-          return;
-        }
-        if (!res.ok) {
-          console.warn("Error cargando pedidos", res.status);
-          return;
-        }
-        const pedidos = await res.json();
-        const cont = document.getElementById("pedidos-container");
-        const vacio = document.getElementById("vacio");
-        if (!pedidos.length) {
-          cont.innerHTML = "";
-          vacio.classList.remove("hidden");
-          return;
-        }
-        vacio.classList.add("hidden");
-        cont.innerHTML = pedidos
-          .map((p) => {
-            const titulo = p.mesa
-              ? `Mesa ${p.mesa}`
-              : p.habitacion_numero
-                ? `Hab ${p.habitacion_numero}`
-                : `#${p.id}`;
-            const cls = p.tipo === "bar" ? "bar" : "cocina";
-            const items = p.detalles
-              .map(
-                (d) =>
-                  `<li>${d.cantidad}× <strong>${d.producto_nombre}</strong>${
-                    d.area && d.area !== "general"
-                      ? ` <span class="text-xs text-slate-500">(${d.area})</span>`
-                      : ""
-                  }</li>`,
-              )
-              .join("");
-            const acciones =
-              p.estado_cocina === "pendiente"
-                ? `<button data-id="${p.id}" data-estado="en_preparacion" class="btn-marcar bg-amber-500 text-white px-3 py-2 rounded">▶ En preparación</button>
-                   <button data-id="${p.id}" data-estado="listo" class="btn-marcar bg-emerald-600 text-white px-3 py-2 rounded">✅ Listo</button>`
-                : `<button data-id="${p.id}" data-estado="listo" class="btn-marcar bg-emerald-600 text-white px-3 py-2 rounded">✅ Listo</button>
-                   <button data-id="${p.id}" data-estado="entregado" class="btn-marcar bg-slate-600 text-white px-3 py-2 rounded">📦 Entregado</button>`;
-            return `
-              <article class="ticket ${cls} rounded-lg shadow p-4">
-                <div class="flex justify-between items-start mb-2">
-                  <div>
-                    <p class="text-lg font-bold">${titulo}</p>
-                    <p class="text-xs uppercase opacity-70">${p.tipo} · ${p.estado_cocina}</p>
-                  </div>
-                  <p class="text-xs">${formatTimeVE(p.fecha)}</p>
-                </div>
-                <ul class="text-sm space-y-1 mb-3">${items}</ul>
-                <div class="grid grid-cols-2 gap-2 text-sm">${acciones}</div>
-              </article>
-            `;
-          })
-          .join("");
-        cont.querySelectorAll(".btn-marcar").forEach((btn) =>
-          btn.addEventListener("click", () =>
-            marcarEstado(Number(btn.dataset.id), btn.dataset.estado),
-          ),
-        );
-      } catch (err) {
-        console.warn("Error en cocina:", err);
-      }
-    }
-
-    async function marcarEstado(id, estado) {
-      try {
-        const res = await fetch(`/api/pedidos/${id}/cocina-estado`, {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${getToken()}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ estado_cocina: estado }),
-        });
-        if (res.status === 401) redirectToLogin();
-        await cargarPedidos();
-      } catch (err) {
-        console.warn(err);
-      }
-    }
-
-    document.getElementById("btn-logout").addEventListener("click", () => {
-      fetch("/api/auth/logout", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-      }).finally(() => {
-        clearSession();
-        redirectToLogin();
-      });
-    });
-
-    function tickHora() {
-      document.getElementById("cocina-hora").textContent = nowVE();
-    }
-
-    cargarPedidos();
-    tickHora();
-    setInterval(cargarPedidos, 10_000);
-    setInterval(tickHora, 30_000);
-
-    // Auto-logout por inactividad (30 minutos).
-    let inactividadTimer;
-    function resetInactividad() {
-      clearTimeout(inactividadTimer);
-      inactividadTimer = setTimeout(() => {
-        clearSession();
-        redirectToLogin();
-      }, 30 * 60 * 1000);
-    }
-    ["click", "mousemove", "keypress", "touchstart"].forEach((evt) =>
-      document.addEventListener(evt, resetInactividad, { passive: true }),
-    );
-    resetInactividad();
-  </script>
+  <script type="module" src="/static/js/cocina.js"></script>
 </body>
 </html>

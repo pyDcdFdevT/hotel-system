@@ -1743,6 +1743,138 @@ def test_pago_anticipado_bs_con_tasa(client):
     assert abs(float(body["pagado_parcial_bs"]) - monto_bs) < 0.5
 
 
+def _primer_producto_venta(client):
+    """Devuelve el id de un producto activo y para venta directa (no insumo).
+
+    Lo usamos como ítem dummy en los tests de creación de pedidos (la API
+    siempre requiere ``items``).
+    """
+    productos = client.get("/api/productos/").json()
+    prod = next(
+        (
+            p
+            for p in productos
+            if p.get("activo") and p.get("es_para_venta") and float(p.get("stock_actual", 0)) > 0
+        ),
+        None,
+    )
+    assert prod, "Se necesita al menos un producto disponible para venta"
+    return prod
+
+
+def test_crear_mesa_simplificada(client):
+    """POST /pedidos/ acepta (tipo + mesa + 1 ítem) y crea la cuenta abierta.
+
+    Reproduce el flujo del modal "Nueva mesa" simplificado: el usuario
+    introduce sólo el nombre, añade un producto y se envía. El backend
+    devuelve la cuenta en estado ``abierto``.
+    """
+    nombre = "Mesa Simplificada"
+    prod = _primer_producto_venta(client)
+    resp = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": nombre,
+            "items": [{"producto_id": prod["id"], "cantidad": 1}],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["estado"] == "abierto"
+    assert body["mesa"] == nombre
+    assert body["habitacion_numero"] in (None, "")
+    activos = client.get("/api/pedidos/activos").json()
+    assert any(p["id"] == body["id"] for p in activos)
+
+
+def test_no_duplicar_mesas(client):
+    """Crear dos cuentas con el mismo nombre debe fallar con 400.
+
+    Cubre el nombre exacto y variantes (mayúsculas / espacios) — la
+    comparación en el backend es case-insensitive y normaliza espacios.
+    """
+    nombre = "Mesa Duplicada"
+    prod = _primer_producto_venta(client)
+    primera = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": nombre,
+            "items": [{"producto_id": prod["id"], "cantidad": 1}],
+        },
+    )
+    assert primera.status_code == 201, primera.text
+
+    duplicada = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": nombre,
+            "items": [{"producto_id": prod["id"], "cantidad": 1}],
+        },
+    )
+    assert duplicada.status_code == 400, duplicada.text
+    detalle = duplicada.json()["detail"].lower()
+    assert "ya existe" in detalle and nombre.lower() in detalle
+
+    for variante in (f"  {nombre}  ", nombre.upper(), nombre.lower()):
+        resp = client.post(
+            "/api/pedidos/",
+            json={
+                "tipo": "restaurante",
+                "mesa": variante,
+                "items": [{"producto_id": prod["id"], "cantidad": 1}],
+            },
+        )
+        assert (
+            resp.status_code == 400
+        ), f"Variante '{variante}' debería rechazarse: {resp.text}"
+
+
+def test_no_duplicar_habitacion_activa(client):
+    """Dos cuentas POS abiertas contra la misma habitación → 400."""
+    habs = client.get("/api/habitaciones/").json()
+    hab = next((h for h in habs if h["estado"] != "inhabilitada"), None)
+    assert hab, "Se necesita al menos una habitación habilitada"
+    numero = hab["numero"]
+    prod = _primer_producto_venta(client)
+
+    primera = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "habitacion",
+            "habitacion_numero": numero,
+            "items": [{"producto_id": prod["id"], "cantidad": 1}],
+        },
+    )
+    assert primera.status_code == 201, primera.text
+
+    duplicada = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "habitacion",
+            "habitacion_numero": numero,
+            "items": [{"producto_id": prod["id"], "cantidad": 1}],
+        },
+    )
+    assert duplicada.status_code == 400, duplicada.text
+    assert "habitación" in duplicada.json()["detail"].lower()
+
+    # Tras cancelar la primera, la segunda creación SÍ debe permitirse.
+    cancel = client.delete(f"/api/pedidos/{primera.json()['id']}/cancelar")
+    assert cancel.status_code in (200, 204), cancel.text
+    rehecha = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "habitacion",
+            "habitacion_numero": numero,
+            "items": [{"producto_id": prod["id"], "cantidad": 1}],
+        },
+    )
+    assert rehecha.status_code == 201, rehecha.text
+
+
 def test_pago_anticipado_bs_paralelo(client):
     """La misma lógica con tasa paralelo: el monto cambia según la tasa.
 
@@ -1776,3 +1908,236 @@ def test_pago_anticipado_bs_paralelo(client):
     body = resp.json()
     assert body["estado_pago"] == "pagado"
     assert abs(float(body["pagado_parcial_bs"]) - monto_bs) < 0.5
+
+
+# ---------------------------------------------------------------------------
+# Estados por detalle (cocina/bar) + favoritos editables
+# ---------------------------------------------------------------------------
+def test_estado_detalle_flujo_completo(client):
+    """Avanzar el estado de un detalle: pendiente → en_preparacion → listo → entregado."""
+    prod = _primer_producto_venta(client)
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Mesa Estados Flujo",
+            "items": [{"producto_id": prod["id"], "cantidad": 2}],
+        },
+    ).json()
+    pedido_id = pedido["id"]
+    detalles = client.get(f"/api/pedidos/{pedido_id}/detalles").json()
+    assert len(detalles) == 1
+    det = detalles[0]
+    assert det["estado"] == "pendiente"
+    assert det["iniciado_en"] is None
+
+    r1 = client.put(
+        f"/api/pedidos/{pedido_id}/detalles/{det['id']}/estado",
+        json={"estado": "en_preparacion"},
+    )
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["estado"] == "en_preparacion"
+    assert r1.json()["iniciado_en"] is not None
+
+    r2 = client.put(
+        f"/api/pedidos/{pedido_id}/detalles/{det['id']}/estado",
+        json={"estado": "listo"},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["estado"] == "listo"
+    assert r2.json()["listo_en"] is not None
+
+    r3 = client.put(
+        f"/api/pedidos/{pedido_id}/detalles/{det['id']}/estado",
+        json={"estado": "entregado"},
+    )
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["estado"] == "entregado"
+    assert r3.json()["entregado_en"] is not None
+
+
+def test_activos_cocina_filtra_completados(client):
+    """Cuando todos los detalles están listos/entregados, el pedido sale de cocina."""
+    prod = _primer_producto_venta(client)
+    pedido = client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Mesa Cocina Filtro",
+            "items": [{"producto_id": prod["id"], "cantidad": 1}],
+        },
+    ).json()
+    pedido_id = pedido["id"]
+    cola = client.get("/api/pedidos/activos-cocina").json()
+    ids = [p["id"] for p in cola]
+    assert pedido_id in ids, "El pedido recién creado debería aparecer en cocina"
+
+    det_id = pedido["detalles"][0]["id"]
+    client.put(
+        f"/api/pedidos/{pedido_id}/detalles/{det_id}/estado",
+        json={"estado": "listo"},
+    )
+    cola2 = client.get("/api/pedidos/activos-cocina").json()
+    assert pedido_id not in [p["id"] for p in cola2], (
+        "Tras marcar todos los items como 'listo' el pedido debe salir de cocina"
+    )
+
+
+def test_estado_detalle_roles_validan(anon_client):
+    """La cocina NO puede marcar 'entregado'; el mesero SÍ."""
+    admin = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()
+    H_admin = {"Authorization": f"Bearer {admin['token']}"}
+
+    productos = anon_client.get("/api/productos/", headers=H_admin).json()
+    prod = next(
+        p for p in productos
+        if p["activo"] and p["es_para_venta"] and float(p.get("stock_actual", 0)) > 0
+    )
+    pedido = anon_client.post(
+        "/api/pedidos/",
+        json={
+            "tipo": "restaurante",
+            "mesa": "Mesa Roles Estado",
+            "items": [{"producto_id": prod["id"], "cantidad": 1}],
+        },
+        headers=H_admin,
+    ).json()
+    det_id = pedido["detalles"][0]["id"]
+
+    cocina = anon_client.post("/api/auth/login", json={"pin": "3333"}).json()
+    H_cocina = {"Authorization": f"Bearer {cocina['token']}"}
+    r_init = anon_client.put(
+        f"/api/pedidos/{pedido['id']}/detalles/{det_id}/estado",
+        json={"estado": "en_preparacion"},
+        headers=H_cocina,
+    )
+    assert r_init.status_code == 200, r_init.text
+    r_listo = anon_client.put(
+        f"/api/pedidos/{pedido['id']}/detalles/{det_id}/estado",
+        json={"estado": "listo"},
+        headers=H_cocina,
+    )
+    assert r_listo.status_code == 200, r_listo.text
+
+    r_no = anon_client.put(
+        f"/api/pedidos/{pedido['id']}/detalles/{det_id}/estado",
+        json={"estado": "entregado"},
+        headers=H_cocina,
+    )
+    assert r_no.status_code == 403, r_no.text
+
+    mesero = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()
+    H_mesero = {"Authorization": f"Bearer {mesero['token']}"}
+    r_ok = anon_client.put(
+        f"/api/pedidos/{pedido['id']}/detalles/{det_id}/estado",
+        json={"estado": "entregado"},
+        headers=H_mesero,
+    )
+    assert r_ok.status_code == 200, r_ok.text
+
+
+def test_favoritos_usuario_crud(client):
+    """CRUD básico de favoritos: listar / agregar / quitar / reordenar."""
+    productos = client.get("/api/productos/").json()
+    candidatos = [p for p in productos if p["activo"] and p["es_para_venta"]]
+    assert len(candidatos) >= 3
+    a, b, c = candidatos[:3]
+
+    # Limpiamos los que pudieran venir de tests anteriores.
+    for p in candidatos[:4]:
+        client.delete(f"/api/productos/favoritos/{p['id']}")
+
+    iniciales = client.get("/api/productos/favoritos/mis-favoritos").json()
+    assert iniciales == []
+
+    r1 = client.post("/api/productos/favoritos", json={"producto_id": a["id"]})
+    assert r1.status_code == 201, r1.text
+    r2 = client.post("/api/productos/favoritos", json={"producto_id": b["id"]})
+    assert r2.status_code == 201
+
+    # Idempotencia.
+    r1b = client.post("/api/productos/favoritos", json={"producto_id": a["id"]})
+    assert r1b.status_code == 201
+    favs = client.get("/api/productos/favoritos/mis-favoritos").json()
+    assert len(favs) == 2
+    assert [f["id"] for f in favs] == [a["id"], b["id"]]
+
+    client.post("/api/productos/favoritos", json={"producto_id": c["id"]})
+    reord = client.put(
+        "/api/productos/favoritos/reordenar",
+        json={"producto_ids": [c["id"], a["id"], b["id"]]},
+    )
+    assert reord.status_code == 200, reord.text
+    favs2 = client.get("/api/productos/favoritos/mis-favoritos").json()
+    assert [f["id"] for f in favs2] == [c["id"], a["id"], b["id"]]
+
+    rem = client.delete(f"/api/productos/favoritos/{a['id']}")
+    assert rem.status_code == 200
+    assert rem.json()["removed"] is True
+    favs3 = client.get("/api/productos/favoritos/mis-favoritos").json()
+    assert [f["id"] for f in favs3] == [c["id"], b["id"]]
+
+    rem2 = client.delete(f"/api/productos/favoritos/{a['id']}")
+    assert rem2.status_code == 200
+    assert rem2.json()["removed"] is False
+
+
+def test_favoritos_son_por_usuario(anon_client):
+    """Los favoritos de admin y mesero son independientes."""
+    admin = anon_client.post("/api/auth/login", json={"pin": "1234"}).json()
+    mesero = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()
+    H_admin = {"Authorization": f"Bearer {admin['token']}"}
+    H_mesero = {"Authorization": f"Bearer {mesero['token']}"}
+
+    productos = anon_client.get("/api/productos/", headers=H_admin).json()
+    aptos = [p for p in productos if p["activo"] and p["es_para_venta"]]
+    p_admin = aptos[0]
+    p_mesero = next(p for p in aptos if p["id"] != p_admin["id"])
+
+    # Limpiamos posibles favoritos previos.
+    for p in aptos[:5]:
+        anon_client.delete(
+            f"/api/productos/favoritos/{p['id']}", headers=H_admin
+        )
+        anon_client.delete(
+            f"/api/productos/favoritos/{p['id']}", headers=H_mesero
+        )
+
+    anon_client.post(
+        "/api/productos/favoritos",
+        json={"producto_id": p_admin["id"]},
+        headers=H_admin,
+    )
+    anon_client.post(
+        "/api/productos/favoritos",
+        json={"producto_id": p_mesero["id"]},
+        headers=H_mesero,
+    )
+
+    favs_admin = anon_client.get(
+        "/api/productos/favoritos/mis-favoritos", headers=H_admin
+    ).json()
+    favs_mesero = anon_client.get(
+        "/api/productos/favoritos/mis-favoritos", headers=H_mesero
+    ).json()
+    ids_admin = [f["id"] for f in favs_admin]
+    ids_mesero = [f["id"] for f in favs_mesero]
+    assert p_admin["id"] in ids_admin
+    assert p_mesero["id"] in ids_mesero
+    assert p_mesero["id"] not in ids_admin
+    assert p_admin["id"] not in ids_mesero
+
+
+def test_favorito_producto_inactivo_rechazado(client):
+    """No se puede marcar como favorito un producto no-venta (insumo)."""
+    productos = client.get("/api/productos/").json()
+    insumo = next((p for p in productos if not p["es_para_venta"]), None)
+    if insumo is None:
+        # Si no hay insumos, marcamos uno como inactivo temporal.
+        candidato = productos[-1]
+        client.put(f"/api/productos/{candidato['id']}", json={"activo": False})
+        insumo = candidato
+    resp = client.post(
+        "/api/productos/favoritos", json={"producto_id": insumo["id"]}
+    )
+    assert resp.status_code == 400, resp.text

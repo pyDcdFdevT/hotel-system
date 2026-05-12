@@ -316,8 +316,45 @@ class DetallePedido(Base):
     precio_unit_usd = Column(Numeric(10, 2), default=0, nullable=False)
     subtotal_bs = Column(Numeric(12, 2), default=0, nullable=False)
     subtotal_usd = Column(Numeric(10, 2), default=0, nullable=False)
+    # ----------- Flujo cocina / bar por producto -----------
+    # Estados: ``pendiente`` → ``en_preparacion`` → ``listo`` → ``entregado``.
+    # El ``estado_cocina`` legado en ``Pedido`` queda como agregado, pero la
+    # autoridad ahora vive en cada detalle (granularidad por ítem).
+    estado = Column(
+        String(20), default="pendiente", nullable=False, index=True
+    )
+    iniciado_en = Column(DateTime, nullable=True)
+    listo_en = Column(DateTime, nullable=True)
+    entregado_en = Column(DateTime, nullable=True)
 
     pedido = relationship("Pedido", back_populates="detalles")
+    producto = relationship("Producto")
+
+
+class FavoritoUsuario(Base):
+    """Favoritos editables por usuario en el POS.
+
+    Cada usuario decide qué productos quiere ver primero en el panel de
+    "Favoritos" del POS. El orden es estable (``orden`` ascendente, luego
+    ``created_at``).
+    """
+
+    __tablename__ = "favoritos_usuario"
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "producto_id", name="uq_favorito_usuario_producto"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(
+        Integer, ForeignKey("usuarios.id"), nullable=False, index=True
+    )
+    producto_id = Column(
+        Integer, ForeignKey("productos.id"), nullable=False, index=True
+    )
+    orden = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=caracas_now, nullable=False)
+
+    usuario = relationship("Usuario")
     producto = relationship("Producto")
 
 

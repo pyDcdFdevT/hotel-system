@@ -793,48 +793,55 @@
         </div>
       </div>
 
-      <!-- Modal nueva mesa -->
+      <!-- Modal nueva mesa (simplificado: solo nombre + botón) -->
       <div id="modal-nueva-mesa" class="modal-backdrop hidden">
-        <form id="form-nueva-mesa" class="card p-5 w-full max-w-md space-y-3">
-          <h3 class="text-lg font-semibold">Nueva cuenta</h3>
-
-          <div class="flex gap-2 text-sm">
-            <label class="flex items-center gap-1">
-              <input type="radio" name="modo" value="mesa" checked /> Mesa / Cliente
-            </label>
-            <label class="flex items-center gap-1">
-              <input type="radio" name="modo" value="habitacion" /> Habitación
-            </label>
-          </div>
-
-          <div id="nueva-mesa-bloque-mesa">
-            <label class="text-xs uppercase text-slate-500">Mesa / Cliente</label>
-            <input name="mesa" placeholder="Ej: Mesa 5 o Juan Pérez" class="w-full border rounded px-2 py-1" />
-          </div>
-
-          <div id="nueva-mesa-bloque-habitacion" class="hidden">
-            <label class="text-xs uppercase text-slate-500">Habitación (número)</label>
-            <input id="pos-input-habitacion" name="habitacion_numero" list="pos-habitaciones-list" placeholder="Ej: 101" class="w-full border rounded px-2 py-1" />
-            <datalist id="pos-habitaciones-list"></datalist>
-            <p class="text-xs text-slate-500 mt-1">La cuenta se registra contra el número de habitación, incluso sin check-in previo.</p>
-          </div>
-
+        <form id="form-nueva-mesa" class="card p-5 w-full max-w-sm space-y-4">
+          <h3 class="text-lg font-semibold">➕ Nueva mesa</h3>
           <div>
-            <label class="text-xs uppercase text-slate-500">Tipo</label>
-            <select name="tipo" class="w-full border rounded px-2 py-1">
-              <option value="restaurante">Restaurante</option>
-              <option value="bar">Bar</option>
-              <option value="habitacion">Habitación</option>
-              <option value="general">General</option>
-            </select>
-          </div>
-          <div>
-            <label class="text-xs uppercase text-slate-500">Cargar a reserva (opcional)</label>
-            <select id="pos-reserva" name="reserva_id" class="w-full border rounded px-2 py-1"></select>
+            <label class="text-xs uppercase text-slate-500">Nombre de mesa / cliente</label>
+            <input
+              id="nueva-mesa-input"
+              name="mesa"
+              required
+              autocomplete="off"
+              placeholder="Ej: Mesa 5 o Juan Pérez"
+              class="w-full border rounded px-2 py-1"
+            />
+            <p class="text-xs text-slate-500 mt-1" id="nueva-mesa-hint">
+              El nombre debe ser único entre las cuentas activas.
+            </p>
           </div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" id="nueva-mesa-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
-            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Abrir cuenta</button>
+            <button type="submit" class="px-3 py-1 bg-blue-600 text-white rounded">Crear cuenta</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Modal nueva habitación (separado: usa el número como identificador) -->
+      <div id="modal-nueva-habitacion" class="modal-backdrop hidden">
+        <form id="form-nueva-habitacion" class="card p-5 w-full max-w-sm space-y-4">
+          <h3 class="text-lg font-semibold">🏨 Cuenta por habitación</h3>
+          <div>
+            <label class="text-xs uppercase text-slate-500">Habitación (número)</label>
+            <input
+              id="pos-input-habitacion"
+              name="habitacion_numero"
+              list="pos-habitaciones-list"
+              required
+              autocomplete="off"
+              placeholder="Ej: 101"
+              class="w-full border rounded px-2 py-1"
+            />
+            <datalist id="pos-habitaciones-list"></datalist>
+            <p class="text-xs text-slate-500 mt-1">
+              La cuenta se asocia al número de habitación. Solo se permite una
+              cuenta activa por habitación.
+            </p>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="nueva-habitacion-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
+            <button type="submit" class="px-3 py-1 bg-amber-600 text-white rounded">Crear cuenta</button>
           </div>
         </form>
       </div>

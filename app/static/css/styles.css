@@ -422,6 +422,36 @@ th {
   letter-spacing: 0.04em;
 }
 
+.pos-prod-btn {
+  position: relative;
+}
+.pos-fav-toggle {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.3rem;
+  background: rgba(248, 250, 252, 0.95);
+  border: 1px solid #cbd5e1;
+  border-radius: 9999px;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.7rem;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.pos-fav-toggle:hover {
+  background-color: #fde68a;
+  color: #92400e;
+}
+.btn-quitar-fav.pos-fav-toggle:hover {
+  background-color: #fecaca;
+  color: #991b1b;
+}
+
 /* Contenedor con scroll para el acordeón de categorías en POS. */
 .pos-categorias-container {
   max-height: 60vh;
