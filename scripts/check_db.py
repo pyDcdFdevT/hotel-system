@@ -304,6 +304,15 @@ def _seed_usuario_barra(engine) -> None:
     Se ejecuta antes del seed normal para que, aunque se haya editado la lista
     de ``USUARIOS_INICIALES`` después de la primera carga, la cuenta de barra
     quede creada en bases existentes (Railway no re-corre el seed completo).
+
+    Estrategia:
+    1. Verificamos si el usuario ya existe (por nombre).
+    2. Si existe → actualizamos rol/activo si es necesario (sin tocar
+       ``created_at`` para no falsear la auditoría).
+    3. Si no existe → ``INSERT`` con ``created_at`` explícito en hora de
+       Caracas. Sin esto, SQLite levantaba::
+
+           sqlite3.IntegrityError: NOT NULL constraint failed: usuarios.created_at
     """
     if not _is_sqlite(engine):
         return
@@ -322,23 +331,28 @@ def _seed_usuario_barra(engine) -> None:
             {"n": "Barra"},
         ).first()
 
-        # Generamos el hash con la misma función que usa el resto del sistema.
-        # Importar aquí evita ciclos al cargar este módulo.
+        # Importes locales para evitar ciclos al cargar este módulo.
+        from app.models import caracas_now
         from app.routers.auth import hash_pin
 
-        pin_hash = hash_pin("4444")
         if fila is None:
+            pin_hash = hash_pin("4444")
+            # ``usuarios.created_at`` es NOT NULL y el INSERT directo en SQL
+            # no dispara el ``default=caracas_now`` definido en el modelo;
+            # por eso lo pasamos explícitamente.
+            created_at = caracas_now().isoformat()
             print("[check_db] Creando usuario 'Barra' (rol=barra, PIN 4444)…")
             conn.execute(
                 text(
-                    "INSERT INTO usuarios (nombre, pin_hash, rol, activo) "
-                    "VALUES (:n, :p, :r, 1)"
+                    "INSERT INTO usuarios (nombre, pin_hash, rol, activo, created_at) "
+                    "VALUES (:n, :p, :r, 1, :c)"
                 ),
-                {"n": "Barra", "p": pin_hash, "r": "barra"},
+                {"n": "Barra", "p": pin_hash, "r": "barra", "c": created_at},
             )
             return
 
         # Existe: nos aseguramos de que el rol sea "barra" y que esté activo.
+        # No tocamos ``created_at`` para no falsear la auditoría histórica.
         if (fila[1] or "").lower() != "barra" or not fila[2]:
             print("[check_db] Actualizando rol/activo del usuario 'Barra'…")
             conn.execute(
