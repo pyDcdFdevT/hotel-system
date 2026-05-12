@@ -1635,3 +1635,144 @@ def test_editar_huesped_requiere_ocupada(client):
         json={"huesped": "Sin ocupar"},
     )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Inicio reordenado + late check-out reflejado en habitaciones
+# ---------------------------------------------------------------------------
+def test_late_checkout_en_inicio(client):
+    """Tarjeta Habitaciones del Inicio debe sumar tarifa + recarga (no sólo tarifa).
+
+    Reproduce el bug: una habitación con tarifa $20 y late check-out de 3
+    horas ($15) debe contabilizarse como $35 en ``ventas-por-area-con-metodos``
+    (no $20 como ocurría antes del fix).
+    """
+    hab = _habitacion_disponible(client)
+    checkin = client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={"huesped": "Late Inicio", "noches": 1, "tarifa_usd": 20},
+    )
+    assert checkin.status_code == 200, checkin.text
+
+    preview = client.get(
+        f"/api/habitaciones/{hab['id']}/checkout-preview?hora_salida=16:00"
+    ).json()
+    assert preview["horas_extra"] == 3
+    recarga = float(preview["recarga_extra_usd"])
+    tarifa = float(preview["tarifa_usd"])
+    assert recarga == 15.0
+    assert tarifa == 20.0
+
+    cierre = client.post(
+        f"/api/habitaciones/{hab['id']}/checkout",
+        json={"opcion_pago": "efectivo_usd", "hora_salida": "16:00"},
+    )
+    assert cierre.status_code == 200, cierre.text
+
+    data = client.get("/api/reportes/ventas-por-area-con-metodos").json()
+    total_habs = float(data["habitaciones"]["total_usd"])
+    # El reporte debe incluir tarifa + recarga = $35, NO $20 sólo.
+    assert total_habs >= tarifa + recarga, (
+        f"Total habitaciones {total_habs} < tarifa+recarga {tarifa + recarga}"
+    )
+    metodos = data["habitaciones"]["metodos"]
+    assert "efectivo_usd" in metodos
+    assert float(metodos["efectivo_usd"]["usd"]) >= recarga
+
+
+def test_inicio_reordenado(client):
+    """El HTML del Inicio debe respetar el nuevo orden: areas → resumen → tx."""
+    html = client.get("/").text
+    pos_areas_titulo = html.find('id="dash-areas-metodos"')
+    pos_total_general = html.find('id="dash-areas-total-general"')
+    pos_resumen = html.find("Resumen general")
+    pos_tx = html.find('id="ultimas-transacciones"')
+
+    assert pos_areas_titulo != -1, "Falta bloque ventas por área"
+    assert pos_total_general != -1, "Falta TOTAL GENERAL"
+    assert pos_resumen != -1, "Falta Resumen general"
+    assert pos_tx != -1, "Falta Últimas transacciones"
+
+    # Orden esperado: áreas (con total general) → resumen → transacciones.
+    assert pos_areas_titulo < pos_resumen < pos_tx, (
+        f"Orden incorrecto: areas@{pos_areas_titulo} resumen@{pos_resumen} tx@{pos_tx}"
+    )
+    assert pos_total_general < pos_resumen, "TOTAL GENERAL debe ir dentro del bloque de áreas"
+
+    # No debe haber duplicado: solo un ID dash-areas-metodos.
+    assert html.count('id="dash-areas-metodos"') == 1
+    # "Productos con stock bajo" debe estar SOLO en Inventario (movido).
+    # Buscamos su tabla actual:
+    assert html.count('id="inv-tabla-bajo-stock"') == 1
+    # Y NO debe existir el id antiguo del Inicio:
+    assert 'id="dash-tabla-bajo-stock"' not in html
+
+
+def test_pago_anticipado_bs_con_tasa(client):
+    """Pagar anticipado en Bs usando tasa BCV: pagado_parcial_bs debe coincidir.
+
+    Verifica que el endpoint acepta ``monto_recibido_bs`` con la tasa BCV y
+    deja la reserva en estado ``pagado`` (cuando el monto cubre el total).
+    """
+    bcv = float(client.get("/api/tasa/actual").json()["bcv"])
+    assert bcv > 0, "BCV no configurado"
+    hab = _habitacion_disponible(client)
+
+    cot = client.get(
+        f"/api/habitaciones/{hab['id']}/checkin-cotizacion?noches=1"
+    ).json()
+    total_usd = float(cot["total_usd"])
+    # Cantidad equivalente en Bs a la tasa BCV (autocompletado del frontend).
+    monto_bs = round(total_usd * bcv, 2)
+
+    resp = client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={
+            "huesped": "Pago BCV Bs",
+            "noches": 1,
+            "pago_anticipado": True,
+            "moneda_pago": "bs",
+            "metodo_pago": "transferencia",
+            "monto_recibido_bs": monto_bs,
+            "tasa_tipo": "bcv",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["estado_pago"] == "pagado"
+    assert abs(float(body["pagado_parcial_bs"]) - monto_bs) < 0.5
+
+
+def test_pago_anticipado_bs_paralelo(client):
+    """La misma lógica con tasa paralelo: el monto cambia según la tasa.
+
+    Confirma que el backend acepta ``tasa_tipo=paralelo`` y guarda el monto
+    en Bs correcto. (El autocompletado en el frontend usa BCV o paralelo,
+    pero la tasa que se persiste es la indicada por el frontend.)
+    """
+    paralelo = float(client.get("/api/tasa/actual").json()["paralelo"])
+    assert paralelo > 0, "Paralelo no configurado"
+    hab = _habitacion_disponible(client)
+
+    cot = client.get(
+        f"/api/habitaciones/{hab['id']}/checkin-cotizacion?noches=1&tasa_tipo=paralelo"
+    ).json()
+    total_usd = float(cot["total_usd"])
+    monto_bs = round(total_usd * paralelo, 2)
+
+    resp = client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={
+            "huesped": "Pago Paralelo",
+            "noches": 1,
+            "pago_anticipado": True,
+            "moneda_pago": "bs",
+            "metodo_pago": "pagomovil",
+            "monto_recibido_bs": monto_bs,
+            "tasa_tipo": "paralelo",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["estado_pago"] == "pagado"
+    assert abs(float(body["pagado_parcial_bs"]) - monto_bs) < 0.5

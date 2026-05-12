@@ -48,30 +48,28 @@
   <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
     <!-- Inicio -->
     <section id="tab-dashboard" class="tab-panel active">
-      <h2 class="text-lg font-semibold mb-3">Ventas del día por área</h2>
-      <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="card p-4 border-l-4 border-amber-500">
-          <p class="text-xs uppercase text-slate-500">Habitaciones</p>
-          <p class="text-xl font-bold mt-1" id="dash-area-habitaciones-usd">$ --</p>
-          <p class="text-sm text-slate-500" id="dash-area-habitaciones-bs">Bs --</p>
+      <!-- ============ 1. Ventas del día por área (bloque único) ============ -->
+      <div class="card p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Ventas del día por área</h2>
+          <span class="text-xs text-slate-500" id="dash-areas-actualizado">--</span>
         </div>
-        <div class="card p-4 border-l-4 border-purple-500">
-          <p class="text-xs uppercase text-slate-500">Bar</p>
-          <p class="text-xl font-bold mt-1" id="dash-area-bar-usd">$ --</p>
-          <p class="text-sm text-slate-500" id="dash-area-bar-bs">Bs --</p>
+        <div id="dash-areas-metodos" class="grid md:grid-cols-2 gap-4">
+          <div class="text-sm text-slate-500">Cargando…</div>
         </div>
-        <div class="card p-4 border-l-4 border-emerald-500">
-          <p class="text-xs uppercase text-slate-500">Cocina</p>
-          <p class="text-xl font-bold mt-1" id="dash-area-cocina-usd">$ --</p>
-          <p class="text-sm text-slate-500" id="dash-area-cocina-bs">Bs --</p>
-        </div>
-        <div class="card p-4 bg-slate-900 text-white">
-          <p class="text-xs uppercase opacity-80">Total general</p>
-          <p class="text-xl font-bold mt-1" id="dash-area-total-usd">$ --</p>
-          <p class="text-sm opacity-80" id="dash-area-total-bs">Bs --</p>
+        <!-- TOTAL GENERAL (suma de todas las áreas, USD y Bs) -->
+        <div id="dash-areas-total-general" class="dash-total-general mt-4">
+          <span class="font-semibold">TOTAL GENERAL</span>
+          <span class="dash-total-monto">
+            <strong id="dash-areas-total-usd">$ 0.00</strong>
+            <span class="text-slate-500"> · </span>
+            <strong id="dash-areas-total-bs">Bs 0,00</strong>
+          </span>
         </div>
       </div>
-      <h2 class="text-lg font-semibold mb-3">Resumen general</h2>
+
+      <!-- ============ 2. Resumen general ============ -->
+      <h2 class="text-lg font-semibold mb-3 mt-6">Resumen general</h2>
       <div class="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
         <div class="card p-4">
           <p class="text-xs uppercase text-slate-500">Ventas hoy (Bs)</p>
@@ -99,10 +97,6 @@
           <p class="text-xs text-slate-500"><span id="dash-habs-ocupadas">--</span> habitaciones</p>
         </div>
         <div class="card p-4">
-          <p class="text-xs uppercase text-slate-500">Bajo stock</p>
-          <p class="text-2xl font-bold mt-1" id="dash-bajo-stock">--</p>
-        </div>
-        <div class="card p-4">
           <p class="text-xs uppercase text-slate-500">Tasa BCV</p>
           <p class="text-2xl font-bold mt-1"><span id="dash-tasa-bcv">--</span> Bs</p>
         </div>
@@ -111,33 +105,8 @@
           <p class="text-2xl font-bold mt-1"><span id="dash-tasa-paralelo">--</span> Bs</p>
         </div>
       </div>
-      <div class="card p-4 mt-6">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold">Ventas del día por área</h2>
-          <span class="text-xs text-slate-500" id="dash-areas-actualizado">--</span>
-        </div>
-        <div id="dash-areas-metodos" class="grid md:grid-cols-2 gap-4">
-          <div class="text-sm text-slate-500">Cargando…</div>
-        </div>
-      </div>
 
-      <div class="card p-4 mt-6">
-        <h2 class="text-lg font-semibold mb-3">Productos con stock bajo</h2>
-        <div class="overflow-x-auto">
-          <table>
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th>Categoría</th>
-                <th>Stock</th>
-                <th>Mínimo</th>
-              </tr>
-            </thead>
-            <tbody id="dash-tabla-bajo-stock"></tbody>
-          </table>
-        </div>
-      </div>
-
+      <!-- ============ 3. Últimas transacciones ============ -->
       <div id="ultimas-transacciones" class="card p-4 mt-6">
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-lg font-semibold">Últimas transacciones</h2>
@@ -222,157 +191,155 @@
 
       <!-- Modal Check-in -->
       <div id="modal-checkin" class="modal-backdrop hidden">
-        <form id="form-checkin" class="card p-5 w-full max-w-md space-y-3">
+        <form id="form-checkin" class="card p-5 w-full max-w-3xl space-y-4 modal-scroll">
           <h3 class="text-lg font-semibold" id="checkin-titulo">Check-in</h3>
           <input type="hidden" id="checkin-habitacion-id" name="habitacion_id" />
           <input type="hidden" id="checkin-reserva-id" name="reserva_id" />
-          <div>
-            <label class="text-xs uppercase text-slate-500">Huésped</label>
-            <input name="huesped" required class="w-full border rounded px-2 py-1" />
-          </div>
-          <fieldset class="border rounded p-3 space-y-2" id="checkin-datos-huesped">
-            <legend class="text-sm font-medium text-slate-700 px-1">📋 Datos del huésped</legend>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="text-xs uppercase text-slate-500">País de origen</label>
-                <input name="pais_origen" placeholder="Venezuela" class="w-full border rounded px-2 py-1" />
-              </div>
-              <div>
-                <label class="text-xs uppercase text-slate-500">Tipo</label>
-                <div class="flex gap-3 text-sm pt-1.5">
-                  <label class="flex items-center gap-1">
-                    <input type="radio" name="tipo_documento" value="N" checked /> Nacional
-                  </label>
-                  <label class="flex items-center gap-1">
-                    <input type="radio" name="tipo_documento" value="E" /> Extranjero
-                  </label>
-                </div>
-              </div>
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Número de documento</label>
-              <input name="numero_documento" placeholder="Cédula o Pasaporte" class="w-full border rounded px-2 py-1" />
-            </div>
-          </fieldset>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Documento (alt)</label>
-              <input name="documento" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Teléfono</label>
-              <input name="telefono" class="w-full border rounded px-2 py-1" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Check-in</label>
-              <input type="date" name="fecha_checkin" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Check-out estimado</label>
-              <input type="date" name="fecha_checkout_estimado" class="w-full border rounded px-2 py-1" />
-            </div>
-          </div>
-          <div class="grid grid-cols-4 gap-2">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Noches</label>
-              <input id="checkin-noches" type="number" name="noches" min="1" value="1" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Hora ingreso</label>
-              <input id="checkin-hora" type="time" name="hora_ingreso" value="15:00" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Precio / noche USD</label>
-              <input id="checkin-tarifa" type="number" step="0.01" name="tarifa_usd" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Tasa Bs</label>
-              <select id="checkin-tasa-tipo" class="w-full border rounded px-2 py-1">
-                <option value="bcv">BCV</option>
-                <option value="paralelo">Paralelo</option>
-              </select>
-            </div>
-          </div>
-          <div id="checkin-total" class="border rounded p-3 bg-emerald-50 text-sm">
-            <p>Noches: <strong id="checkin-total-noches">1</strong> · Precio: <strong id="checkin-total-unit">$ 0.00</strong></p>
-            <p class="text-base mt-1">
-              Total: <strong id="checkin-total-usd">$ 0.00</strong>
-              · <span id="checkin-total-bs" class="text-slate-700">Bs 0.00</span>
-            </p>
-            <p class="text-xs text-slate-500" id="checkin-tasa-info">Tasa: --</p>
-          </div>
 
-          <details class="border rounded p-2" id="checkin-vehiculo">
-            <summary class="cursor-pointer text-sm font-medium text-slate-700">
-              🚗 Vehículo (opcional)
-            </summary>
-            <div class="grid grid-cols-3 gap-2 mt-2">
+          <div class="grid md:grid-cols-2 gap-4">
+            <!-- ============ Columna izquierda: huésped ============ -->
+            <div class="space-y-3">
               <div>
-                <label class="text-xs uppercase text-slate-500">Modelo</label>
-                <input name="vehiculo_modelo" class="w-full border rounded px-2 py-1" placeholder="Toyota Corolla" />
+                <label class="text-xs uppercase text-slate-500">Huésped *</label>
+                <input name="huesped" required class="w-full border rounded px-2 py-1" />
               </div>
-              <div>
-                <label class="text-xs uppercase text-slate-500">Color</label>
-                <input name="vehiculo_color" class="w-full border rounded px-2 py-1" placeholder="Blanco" />
-              </div>
-              <div>
-                <label class="text-xs uppercase text-slate-500">Placa</label>
-                <input name="vehiculo_placa" class="w-full border rounded px-2 py-1" placeholder="AB123CD" />
-              </div>
-            </div>
-          </details>
-
-          <fieldset class="border rounded p-3 space-y-2" id="checkin-pago">
-            <legend class="text-sm font-medium text-slate-700 px-1">💰 Pago anticipado (opcional)</legend>
-            <div class="flex gap-3 text-sm">
-              <label class="flex items-center gap-1">
-                <input type="radio" name="pago_anticipado" value="0" checked /> Pagar al check-out
-              </label>
-              <label class="flex items-center gap-1">
-                <input type="radio" name="pago_anticipado" value="1" /> Pagar ahora
-              </label>
-            </div>
-            <div id="checkin-pago-detalle" class="hidden space-y-2">
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="text-xs uppercase text-slate-500">Moneda</label>
-                  <select id="checkin-pago-moneda" name="moneda_pago" class="w-full border rounded px-2 py-1">
-                    <option value="usd">USD</option>
-                    <option value="bs">Bolívares</option>
-                  </select>
+              <fieldset class="border rounded p-3 space-y-2" id="checkin-datos-huesped">
+                <legend class="text-sm font-medium text-slate-700 px-1">📋 Documento</legend>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="text-xs uppercase text-slate-500">País</label>
+                    <input name="pais_origen" placeholder="Venezuela" class="w-full border rounded px-2 py-1" />
+                  </div>
+                  <div>
+                    <label class="text-xs uppercase text-slate-500">Tipo</label>
+                    <div class="flex gap-3 text-sm pt-1.5">
+                      <label class="flex items-center gap-1">
+                        <input type="radio" name="tipo_documento" value="N" checked /> N
+                      </label>
+                      <label class="flex items-center gap-1">
+                        <input type="radio" name="tipo_documento" value="E" /> E
+                      </label>
+                    </div>
+                  </div>
                 </div>
                 <div>
-                  <label class="text-xs uppercase text-slate-500">Método</label>
-                  <select id="checkin-pago-metodo" name="metodo_pago" class="w-full border rounded px-2 py-1">
-                    <option value="efectivo">💵 Efectivo</option>
-                    <option value="transferencia">💳 Transferencia</option>
-                    <option value="pagomovil">📱 Pago Móvil</option>
-                  </select>
+                  <label class="text-xs uppercase text-slate-500">Número de documento</label>
+                  <input name="numero_documento" placeholder="Cédula o Pasaporte" class="w-full border rounded px-2 py-1" />
                 </div>
-              </div>
-              <div class="grid grid-cols-2 gap-2">
-                <div id="checkin-pago-usd-row">
-                  <label class="text-xs uppercase text-slate-500">Monto USD</label>
-                  <input id="checkin-pago-usd" type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
+                <div>
+                  <label class="text-xs uppercase text-slate-500">Teléfono</label>
+                  <input name="telefono" class="w-full border rounded px-2 py-1" />
                 </div>
-                <div id="checkin-pago-bs-row" class="hidden">
-                  <label class="text-xs uppercase text-slate-500">Monto Bs</label>
-                  <input id="checkin-pago-bs" type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
-                </div>
-              </div>
-              <p class="text-xs text-slate-500" id="checkin-pago-hint">
-                Si dejas el monto en 0 se asumirá que paga el total de la estadía.
-              </p>
-            </div>
-          </fieldset>
+              </fieldset>
 
-          <div>
-            <label class="text-xs uppercase text-slate-500">Notas</label>
-            <input name="notas" class="w-full border rounded px-2 py-1" />
+              <details class="border rounded p-2" id="checkin-vehiculo">
+                <summary class="cursor-pointer text-sm font-medium text-slate-700">
+                  🚗 Vehículo (opcional)
+                </summary>
+                <div class="grid grid-cols-3 gap-2 mt-2">
+                  <input name="vehiculo_modelo" class="border rounded px-2 py-1" placeholder="Modelo" />
+                  <input name="vehiculo_color" class="border rounded px-2 py-1" placeholder="Color" />
+                  <input name="vehiculo_placa" class="border rounded px-2 py-1" placeholder="Placa" />
+                </div>
+              </details>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Notas</label>
+                <input name="notas" class="w-full border rounded px-2 py-1" />
+              </div>
+            </div>
+
+            <!-- ============ Columna derecha: estadía + pago ============ -->
+            <div class="space-y-3">
+              <fieldset class="border rounded p-3 space-y-2">
+                <legend class="text-sm font-medium text-slate-700 px-1">📅 Estadía</legend>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="text-xs uppercase text-slate-500">Check-in</label>
+                    <input type="date" name="fecha_checkin" class="w-full border rounded px-2 py-1" />
+                  </div>
+                  <div>
+                    <label class="text-xs uppercase text-slate-500">Check-out estimado</label>
+                    <input type="date" name="fecha_checkout_estimado" class="w-full border rounded px-2 py-1" />
+                  </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                  <div>
+                    <label class="text-xs uppercase text-slate-500">Noches</label>
+                    <input id="checkin-noches" type="number" name="noches" min="1" value="1" class="w-full border rounded px-2 py-1" />
+                  </div>
+                  <div>
+                    <label class="text-xs uppercase text-slate-500">Hora ingreso</label>
+                    <input id="checkin-hora" type="time" name="hora_ingreso" value="15:00" class="w-full border rounded px-2 py-1" />
+                  </div>
+                  <div>
+                    <label class="text-xs uppercase text-slate-500">Precio / noche USD</label>
+                    <input id="checkin-tarifa" type="number" step="0.01" name="tarifa_usd" class="w-full border rounded px-2 py-1" />
+                  </div>
+                </div>
+              </fieldset>
+
+              <div id="checkin-total" class="border rounded p-3 bg-emerald-50 text-sm">
+                <p>Noches: <strong id="checkin-total-noches">1</strong> · Precio: <strong id="checkin-total-unit">$ 0.00</strong></p>
+                <p class="text-base mt-1">
+                  Total: <strong id="checkin-total-usd">$ 0.00</strong>
+                </p>
+                <p class="text-xs text-slate-500" id="checkin-tasa-info">La tasa se elige al cobrar.</p>
+              </div>
+
+              <fieldset class="border rounded p-3 space-y-2" id="checkin-pago">
+                <legend class="text-sm font-medium text-slate-700 px-1">💰 Pago anticipado (opcional)</legend>
+                <div class="flex gap-3 text-sm">
+                  <label class="flex items-center gap-1">
+                    <input type="radio" name="pago_anticipado" value="0" checked /> Pagar al check-out
+                  </label>
+                  <label class="flex items-center gap-1">
+                    <input type="radio" name="pago_anticipado" value="1" /> Pagar ahora
+                  </label>
+                </div>
+                <div id="checkin-pago-detalle" class="hidden space-y-2">
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label class="text-xs uppercase text-slate-500">Moneda</label>
+                      <select id="checkin-pago-moneda" name="moneda_pago" class="w-full border rounded px-2 py-1">
+                        <option value="usd">USD</option>
+                        <option value="bs">Bolívares</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="text-xs uppercase text-slate-500">Método</label>
+                      <select id="checkin-pago-metodo" name="metodo_pago" class="w-full border rounded px-2 py-1">
+                        <option value="efectivo">💵 Efectivo</option>
+                        <option value="transferencia">💳 Transferencia</option>
+                        <option value="pagomovil">📱 Pago Móvil</option>
+                      </select>
+                    </div>
+                  </div>
+                  <!-- Selector de tasa: SÓLO aparece cuando se paga ahora en Bs. -->
+                  <div id="checkin-pago-tasa-row" class="hidden">
+                    <label class="text-xs uppercase text-slate-500">Tasa para Bs</label>
+                    <select id="checkin-pago-tasa-tipo" name="tasa_tipo" class="w-full border rounded px-2 py-1">
+                      <option value="bcv">BCV</option>
+                      <option value="paralelo">Paralelo</option>
+                    </select>
+                    <p class="text-xs text-slate-500 mt-1" id="checkin-pago-tasa-info">--</p>
+                  </div>
+                  <div id="checkin-pago-usd-row">
+                    <label class="text-xs uppercase text-slate-500">Monto USD</label>
+                    <input id="checkin-pago-usd" type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
+                  </div>
+                  <div id="checkin-pago-bs-row" class="hidden">
+                    <label class="text-xs uppercase text-slate-500">Monto Bs (autocompletado)</label>
+                    <input id="checkin-pago-bs" type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
+                  </div>
+                  <p class="text-xs text-slate-500" id="checkin-pago-hint">
+                    Si dejas el monto en 0 se asumirá que paga el total de la estadía.
+                  </p>
+                </div>
+              </fieldset>
+            </div>
           </div>
-          <div class="flex justify-end gap-2 pt-2">
+
+          <div class="flex justify-end gap-2 pt-2 border-t">
             <button type="button" id="checkin-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
             <button type="submit" id="checkin-submit" class="px-3 py-1 bg-blue-600 text-white rounded">Confirmar check-in</button>
           </div>
@@ -751,7 +718,7 @@
               <h2 class="text-lg font-semibold">Catálogo</h2>
               <input id="pos-busqueda" placeholder="Buscar producto..." class="border rounded px-2 py-1 text-sm w-56" />
             </div>
-            <div id="pos-categorias"></div>
+            <div id="pos-categorias" class="pos-categorias-container"></div>
           </div>
         </div>
 
@@ -997,6 +964,24 @@
               <tbody id="inv-tabla-productos"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <!-- Productos con stock bajo (movido desde Inicio) -->
+      <div class="card p-4 mt-6">
+        <h2 class="text-lg font-semibold mb-3">Productos con stock bajo</h2>
+        <div class="overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Categoría</th>
+                <th>Stock</th>
+                <th>Mínimo</th>
+              </tr>
+            </thead>
+            <tbody id="inv-tabla-bajo-stock"></tbody>
+          </table>
         </div>
       </div>
 

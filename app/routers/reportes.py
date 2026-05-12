@@ -393,20 +393,34 @@ def ventas_por_area_con_metodos(
             .all()
         )
         for r in reservas:
+            # Habitaciones = tarifa + recarga por late check-out.
+            # ``total_final_*`` ya debería incluir esa suma, pero aplicamos
+            # un ajuste defensivo: si la moneda usada (USD o Bs) quedó por
+            # debajo de ``tarifa + recarga`` (caso legacy donde sólo se grabó
+            # la tarifa sin la recarga), la elevamos a ese mínimo para que
+            # el late check-out quede reflejado en el reporte del día.
+            tarifa_total_usd = (
+                Decimal(r.tarifa_usd or 0) + Decimal(r.recarga_extra_usd or 0)
+            ).quantize(Decimal("0.01"))
+            tarifa_total_bs = (
+                Decimal(r.tarifa_bs or 0) + Decimal(r.recarga_extra_bs or 0)
+            ).quantize(Decimal("0.01"))
             usd = Decimal(r.total_final_usd or 0)
             bs = Decimal(r.total_final_bs or 0)
-            # Si la reserva no guardó el total (legacy o caso raro), lo
-            # reconstruimos a partir de la tarifa y el recargo por horas extra
-            # para que las ventas del día reflejen el late check-out.
+            # Ajuste por moneda usada: sólo elevamos la columna que NO está
+            # vacía (para no contaminar reservas cobradas 100% en una sola
+            # moneda con el valor convertido de la otra).
+            if usd > 0 and usd < tarifa_total_usd:
+                usd = tarifa_total_usd
+            if bs > 0 and bs < tarifa_total_bs:
+                bs = tarifa_total_bs
+            # Si ambos están en 0 (datos muy antiguos), reconstruimos con la
+            # moneda que tenga valor para no perder la venta del día.
             if usd == 0 and bs == 0:
-                usd = (
-                    Decimal(r.tarifa_usd or 0)
-                    + Decimal(r.recarga_extra_usd or 0)
-                ).quantize(Decimal("0.01"))
-                bs = (
-                    Decimal(r.tarifa_bs or 0)
-                    + Decimal(r.recarga_extra_bs or 0)
-                ).quantize(Decimal("0.01"))
+                if tarifa_total_usd > 0:
+                    usd = tarifa_total_usd
+                elif tarifa_total_bs > 0:
+                    bs = tarifa_total_bs
             if usd == 0 and bs == 0:
                 continue
             etiqueta = _clasificar_metodo(r.metodo_pago, usd, bs)

@@ -19,6 +19,7 @@ const els = {
   modalEditar: document.getElementById("modal-producto"),
   formEditar: document.getElementById("form-editar-producto"),
   btnCancelarEditar: document.getElementById("editar-producto-cancelar"),
+  tablaBajoStock: document.getElementById("inv-tabla-bajo-stock"),
 };
 
 let productosCache = [];
@@ -39,7 +40,36 @@ export async function initInventario() {
   if (els.btnCancelarEditar) {
     els.btnCancelarEditar.addEventListener("click", cerrarModalEditar);
   }
-  await Promise.all([loadProductos(), loadMovimientos()]);
+  await Promise.all([loadProductos(), loadMovimientos(), loadBajoStock()]);
+}
+
+/**
+ * Renderiza la tabla de productos con stock por debajo del mínimo
+ * dentro de la pestaña Inventario. Se movió desde Inicio para evitar
+ * duplicación de contenido.
+ */
+export async function loadBajoStock() {
+  if (!els.tablaBajoStock) return;
+  try {
+    const productos = await get("/inventario/bajo-stock");
+    if (!productos.length) {
+      els.tablaBajoStock.innerHTML = `<tr><td colspan="4"><div class="empty-state">Sin productos bajo el mínimo</div></td></tr>`;
+      return;
+    }
+    els.tablaBajoStock.innerHTML = productos
+      .map(
+        (p) => `
+        <tr>
+          <td>${p.nombre}</td>
+          <td>${p.categoria}</td>
+          <td>${Number(p.stock_actual).toFixed(2)} ${p.unidad}</td>
+          <td>${Number(p.stock_minimo).toFixed(2)}</td>
+        </tr>`,
+      )
+      .join("");
+  } catch (error) {
+    els.tablaBajoStock.innerHTML = `<tr><td colspan="4"><div class="empty-state">${error.message}</div></td></tr>`;
+  }
 }
 
 export async function loadProductos() {

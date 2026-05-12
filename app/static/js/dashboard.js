@@ -15,20 +15,12 @@ const els = {
   pedidos: document.getElementById("dash-pedidos"),
   ocupacion: document.getElementById("dash-ocupacion"),
   habsOcupadas: document.getElementById("dash-habs-ocupadas"),
-  bajoStock: document.getElementById("dash-bajo-stock"),
-  tablaBajoStock: document.getElementById("dash-tabla-bajo-stock"),
-  areaHabUsd: document.getElementById("dash-area-habitaciones-usd"),
-  areaHabBs: document.getElementById("dash-area-habitaciones-bs"),
-  areaBarUsd: document.getElementById("dash-area-bar-usd"),
-  areaBarBs: document.getElementById("dash-area-bar-bs"),
-  areaCocinaUsd: document.getElementById("dash-area-cocina-usd"),
-  areaCocinaBs: document.getElementById("dash-area-cocina-bs"),
-  areaTotalUsd: document.getElementById("dash-area-total-usd"),
-  areaTotalBs: document.getElementById("dash-area-total-bs"),
   tablaTx: document.getElementById("dash-tabla-transacciones"),
   txActualizado: document.getElementById("dash-tx-actualizado"),
   areasMetodos: document.getElementById("dash-areas-metodos"),
   areasActualizado: document.getElementById("dash-areas-actualizado"),
+  areasTotalUsd: document.getElementById("dash-areas-total-usd"),
+  areasTotalBs: document.getElementById("dash-areas-total-bs"),
 };
 
 const AREA_META = {
@@ -37,6 +29,9 @@ const AREA_META = {
   cocina: { titulo: "🍳 Cocina", clase: "area-cocina" },
   piscina: { titulo: "🏊 Piscina", clase: "area-piscina" },
 };
+
+// Orden visible de las áreas: tal como pide el usuario.
+const AREAS_ORDEN = ["habitaciones", "bar", "cocina", "piscina"];
 
 const METODOS_ORDEN = [
   "efectivo_usd",
@@ -59,24 +54,19 @@ let txTimer = null;
 
 export async function loadDashboard() {
   try {
-    const [resumen, ventasArea] = await Promise.all([
-      get("/reportes/resumen-dia"),
-      get("/reportes/ventas-por-area"),
-      refreshHeaderTasas(),
-    ]);
+    const resumen = await get("/reportes/resumen-dia");
+    await refreshHeaderTasas();
     if (els.ventasBs) els.ventasBs.textContent = formatBs(resumen.ventas_bs);
     if (els.ventasUsd) els.ventasUsd.textContent = formatUsd(resumen.ventas_usd);
     if (els.gastosBs) els.gastosBs.textContent = formatBs(resumen.gastos_bs);
     if (els.gastosUsd) els.gastosUsd.textContent = formatUsd(resumen.gastos_usd);
     if (els.pedidos) els.pedidos.textContent = resumen.pedidos_cantidad;
-    if (els.ocupacion) els.ocupacion.textContent = `${resumen.ocupacion_porcentaje.toFixed(1)} %`;
+    if (els.ocupacion)
+      els.ocupacion.textContent = `${resumen.ocupacion_porcentaje.toFixed(1)} %`;
     if (els.habsOcupadas) {
       els.habsOcupadas.textContent = `${resumen.habitaciones_ocupadas} / ${resumen.habitaciones_totales}`;
     }
-    if (els.bajoStock) els.bajoStock.textContent = resumen.productos_bajo_stock;
 
-    renderVentasArea(ventasArea);
-    await loadBajoStockTabla();
     await loadVentasPorAreaConMetodos();
     await loadUltimasTransacciones();
     iniciarPolling();
@@ -97,10 +87,19 @@ export async function loadVentasPorAreaConMetodos() {
   if (!els.areasMetodos) return;
   try {
     const data = await get("/reportes/ventas-por-area-con-metodos");
-    const areas = ["habitaciones", "bar", "cocina", "piscina"];
-    els.areasMetodos.innerHTML = areas
-      .map((clave) => renderAreaCard(clave, data[clave]))
-      .join("");
+    els.areasMetodos.innerHTML = AREAS_ORDEN.map((clave) =>
+      renderAreaCard(clave, data[clave]),
+    ).join("");
+    // TOTAL GENERAL = suma de USD y Bs de las 4 áreas.
+    let totalUsd = 0;
+    let totalBs = 0;
+    for (const clave of AREAS_ORDEN) {
+      const area = data[clave] || {};
+      totalUsd += Number(area.total_usd || 0);
+      totalBs += Number(area.total_bs || 0);
+    }
+    if (els.areasTotalUsd) els.areasTotalUsd.textContent = formatUsd(totalUsd);
+    if (els.areasTotalBs) els.areasTotalBs.textContent = formatBs(totalBs);
     if (els.areasActualizado) {
       els.areasActualizado.textContent = `Actualizado ${formatFechaHoraVe(new Date())}`;
     }
@@ -115,7 +114,6 @@ function renderAreaCard(clave, datos) {
   const totalBs = Number(datos?.total_bs || 0);
   const vacia = totalUsd === 0 && totalBs === 0;
   const metodos = datos?.metodos || {};
-  // Ordenamos los métodos según METODOS_ORDEN; cualquier extra (otros) al final.
   const claves = [
     ...METODOS_ORDEN.filter((k) => metodos[k]),
     ...Object.keys(metodos).filter((k) => !METODOS_ORDEN.includes(k)),
@@ -182,45 +180,4 @@ function renderTxFila(tx) {
       <td class="text-xs text-slate-500">${tx.usuario_nombre || "-"}</td>
     </tr>
   `;
-}
-
-function renderVentasArea(data) {
-  if (!data || !Array.isArray(data.areas)) return;
-  const map = Object.fromEntries(
-    data.areas.map((a) => [a.area, a]),
-  );
-  const setArea = (elUsd, elBs, area) => {
-    const v = map[area] || { ventas_bs: 0, ventas_usd: 0 };
-    if (elUsd) elUsd.textContent = formatUsd(v.ventas_usd);
-    if (elBs) elBs.textContent = formatBs(v.ventas_bs);
-  };
-  setArea(els.areaHabUsd, els.areaHabBs, "habitaciones");
-  setArea(els.areaBarUsd, els.areaBarBs, "bar");
-  setArea(els.areaCocinaUsd, els.areaCocinaBs, "cocina");
-  if (els.areaTotalUsd) els.areaTotalUsd.textContent = formatUsd(data.total_usd);
-  if (els.areaTotalBs) els.areaTotalBs.textContent = formatBs(data.total_bs);
-}
-
-async function loadBajoStockTabla() {
-  if (!els.tablaBajoStock) return;
-  try {
-    const productos = await get("/inventario/bajo-stock");
-    if (!productos.length) {
-      els.tablaBajoStock.innerHTML = `<tr><td colspan="4"><div class="empty-state">Sin productos bajo el mínimo</div></td></tr>`;
-      return;
-    }
-    els.tablaBajoStock.innerHTML = productos
-      .map(
-        (p) => `
-        <tr>
-          <td>${p.nombre}</td>
-          <td>${p.categoria}</td>
-          <td>${Number(p.stock_actual).toFixed(2)} ${p.unidad}</td>
-          <td>${Number(p.stock_minimo).toFixed(2)}</td>
-        </tr>`,
-      )
-      .join("");
-  } catch (error) {
-    els.tablaBajoStock.innerHTML = `<tr><td colspan="4"><div class="empty-state">${error.message}</div></td></tr>`;
-  }
 }

@@ -223,6 +223,14 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 50;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+/* Modales largos: limitan altura y permiten scroll vertical interno. */
+.modal-scroll {
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
 .empty-state {
@@ -230,6 +238,26 @@ body {
   text-align: center;
   color: var(--color-muted);
   font-style: italic;
+}
+
+/* ============ Inicio: fila TOTAL GENERAL de ventas por área ============ */
+.dash-total-general {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #0f172a;
+  color: #ffffff;
+  padding: 0.85rem 1.1rem;
+  border-radius: 0.75rem;
+  font-size: 1rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.dash-total-general .dash-total-monto {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 1.1rem;
 }
 
 table {
@@ -392,6 +420,13 @@ th {
   color: var(--color-accent);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* Contenedor con scroll para el acordeón de categorías en POS. */
+.pos-categorias-container {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 .pos-categoria {
