@@ -356,28 +356,41 @@
           <input type="hidden" id="checkout-habitacion-id" name="habitacion_id" />
           <input type="hidden" id="checkout-opcion-pago" name="opcion_pago" value="efectivo_usd" />
 
-          <p class="text-xs uppercase text-slate-500">¿Cómo pagó el huésped?</p>
-          <div id="checkout-opciones" class="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-            <button type="button" class="checkout-opcion border-2 rounded p-2 text-left" data-opcion="efectivo_usd" data-moneda="usd">
-              <span class="block text-base">💵</span>
-              <span class="block font-medium">Efectivo USD</span>
-            </button>
-            <button type="button" class="checkout-opcion border-2 rounded p-2 text-left" data-opcion="efectivo_bs" data-moneda="bs">
-              <span class="block text-base">💴</span>
-              <span class="block font-medium">Efectivo Bs</span>
-            </button>
-            <button type="button" class="checkout-opcion border-2 rounded p-2 text-left" data-opcion="transferencia_bs" data-moneda="bs">
-              <span class="block text-base">💳</span>
-              <span class="block font-medium">Transferencia Bs</span>
-            </button>
-            <button type="button" class="checkout-opcion border-2 rounded p-2 text-left" data-opcion="pagomovil_bs" data-moneda="bs">
-              <span class="block text-base">📱</span>
-              <span class="block font-medium">Pago Móvil Bs</span>
-            </button>
-            <button type="button" class="checkout-opcion border-2 rounded p-2 text-left col-span-2 md:col-span-1" data-opcion="mixto" data-moneda="mixto">
-              <span class="block text-base">💵+💴</span>
-              <span class="block font-medium">Mixto USD+Bs</span>
-            </button>
+          <div class="checkout-metodos space-y-3">
+            <p class="text-xs uppercase text-slate-500">¿Cómo pagó el huésped?</p>
+            <div id="checkout-opciones" class="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+              <button type="button" class="checkout-opcion border-2 rounded p-2 text-left" data-opcion="efectivo_usd" data-moneda="usd">
+                <span class="block text-base">💵</span>
+                <span class="block font-medium">Efectivo USD</span>
+              </button>
+              <button type="button" class="checkout-opcion border-2 rounded p-2 text-left" data-opcion="efectivo_bs" data-moneda="bs">
+                <span class="block text-base">💴</span>
+                <span class="block font-medium">Efectivo Bs</span>
+              </button>
+              <button type="button" class="checkout-opcion border-2 rounded p-2 text-left" data-opcion="transferencia_bs" data-moneda="bs">
+                <span class="block text-base">💳</span>
+                <span class="block font-medium">Transferencia Bs</span>
+              </button>
+              <button type="button" class="checkout-opcion border-2 rounded p-2 text-left" data-opcion="pagomovil_bs" data-moneda="bs">
+                <span class="block text-base">📱</span>
+                <span class="block font-medium">Pago Móvil Bs</span>
+              </button>
+              <button type="button" class="checkout-opcion border-2 rounded p-2 text-left col-span-2 md:col-span-1" data-opcion="mixto" data-moneda="mixto">
+                <span class="block text-base">💵+💴</span>
+                <span class="block font-medium">Mixto USD+Bs</span>
+              </button>
+            </div>
+
+            <div id="checkout-mixto-row" class="hidden grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs uppercase text-slate-500">Recibido USD</label>
+                <input id="checkout-mixto-usd" type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
+              </div>
+              <div>
+                <label class="text-xs uppercase text-slate-500">Recibido Bs</label>
+                <input id="checkout-mixto-bs" type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
+              </div>
+            </div>
           </div>
 
           <div class="grid grid-cols-2 gap-2 items-end">
@@ -397,24 +410,13 @@
 
           <div id="checkout-resumen" class="border rounded p-3 bg-slate-50"></div>
 
-          <div id="checkout-mixto-row" class="hidden grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-xs uppercase text-slate-500">Recibido USD</label>
-              <input id="checkout-mixto-usd" type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label class="text-xs uppercase text-slate-500">Recibido Bs</label>
-              <input id="checkout-mixto-bs" type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
-            </div>
-          </div>
-
           <div>
             <label class="text-xs uppercase text-slate-500">Notas</label>
             <input name="notas" class="w-full border rounded px-2 py-1" />
           </div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" id="checkout-cancelar" class="px-3 py-1 border rounded">Cancelar</button>
-            <button type="submit" class="px-3 py-1 bg-red-600 text-white rounded">Cobrar y cerrar</button>
+            <button type="submit" id="checkout-submit-btn" class="px-3 py-1 bg-red-600 text-white rounded">Cobrar y cerrar</button>
           </div>
         </form>
       </div>

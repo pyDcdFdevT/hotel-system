@@ -53,6 +53,8 @@ const els = {
   checkoutMixtoUsd: document.getElementById("checkout-mixto-usd"),
   checkoutMixtoBs: document.getElementById("checkout-mixto-bs"),
   checkoutHora: document.getElementById("checkout-hora"),
+  checkoutMetodos: document.querySelector("#modal-checkout .checkout-metodos"),
+  checkoutSubmitBtn: document.getElementById("checkout-submit-btn"),
 
   // Sub-formulario "pago anticipado" del check-in.
   checkinPagoDetalle: document.getElementById("checkin-pago-detalle"),
@@ -93,6 +95,8 @@ let habitaciones = [];
 // Mapa habitacion_id -> reserva activa (para mostrar info del huésped en la tarjeta).
 let reservasActivasPorHab = {};
 let pedidosPreviewMeta = {};
+/** Última respuesta de ``checkout-preview`` (confirmar sin método si saldo = 0). */
+let ultimoPreviewCheckout = null;
 
 export async function initHabitaciones() {
   if (els.filtro) els.filtro.addEventListener("change", loadHabitaciones);
@@ -633,9 +637,36 @@ async function confirmarCheckin(event) {
 // ---------------------------------------------------------------------------
 // Check-out
 // ---------------------------------------------------------------------------
+function checkoutSinSaldoPendiente(p) {
+  if (!p) return false;
+  const u = Number(p.saldo_pendiente_usd ?? p.pendiente_usd ?? 0);
+  const b = Number(p.saldo_pendiente_bs ?? p.pendiente_bs ?? 0);
+  return u <= 0 && b <= 0;
+}
+
+/** Oculta métodos de pago y ajusta el botón cuando no hay saldo por cobrar. */
+function aplicarCheckoutMetodosUI(preview) {
+  const sinSaldo = checkoutSinSaldoPendiente(preview);
+  if (els.checkoutMetodos) {
+    if (!preview) els.checkoutMetodos.classList.remove("hidden");
+    else els.checkoutMetodos.classList.toggle("hidden", sinSaldo);
+  }
+  if (els.checkoutSubmitBtn) {
+    if (!preview) {
+      els.checkoutSubmitBtn.textContent = "Cobrar y cerrar";
+    } else {
+      els.checkoutSubmitBtn.textContent = sinSaldo
+        ? "Confirmar salida"
+        : "Cobrar y cerrar";
+    }
+  }
+}
+
 async function abrirCheckout(habId) {
   if (!els.modalCheckout) return;
   els.formCheckout?.reset();
+  ultimoPreviewCheckout = null;
+  aplicarCheckoutMetodosUI(null);
   if (els.checkoutHabId) els.checkoutHabId.value = habId;
   // Hora de salida estándar (cambio manual permitido).
   if (els.checkoutHora) els.checkoutHora.value = "13:00";
@@ -699,19 +730,25 @@ async function recargarPreviewCheckout() {
     const preview = await get(
       `/habitaciones/${habId}/checkout-preview?${params}`,
     );
+    ultimoPreviewCheckout = preview;
     pedidosPreviewMeta = await cargarPedidosPreviewMeta(preview.pedidos || []);
     if (els.checkoutResumen) {
       els.checkoutResumen.innerHTML = renderPreview(preview, moneda);
     }
+    aplicarCheckoutMetodosUI(preview);
     if (moneda === "mixto" && els.checkoutMixtoUsd && els.checkoutMixtoBs) {
       const recibidoUsd = Number(els.checkoutMixtoUsd.value || 0);
-      const objetivoUsd = Number(preview.pendiente_usd ?? preview.total_usd ?? 0);
+      const objetivoUsd = Number(
+        preview.saldo_pendiente_usd ?? preview.pendiente_usd ?? preview.total_usd ?? 0,
+      );
       const faltanteUsd = Math.max(0, objetivoUsd - recibidoUsd);
       els.checkoutMixtoBs.value = (
         faltanteUsd * Number(preview.tasa_aplicada || 0)
       ).toFixed(2);
     }
   } catch (error) {
+    ultimoPreviewCheckout = null;
+    aplicarCheckoutMetodosUI(null);
     if (els.checkoutResumen) {
       els.checkoutResumen.innerHTML = `<p class="text-sm text-red-600">${error.message}</p>`;
     }
@@ -745,10 +782,13 @@ function renderPreview(p, moneda = "usd") {
         .map((id) => pedidosPreviewMeta[id] || `Pedido #${id}`)
         .join(", ")}</p>`
     : "";
-  const pendienteUsd = Number(p.pendiente_usd ?? p.total_usd ?? 0);
-  const pendienteBs = Number(p.pendiente_bs ?? p.total_bs ?? 0);
+  const pendienteUsd = Number(p.saldo_pendiente_usd ?? p.pendiente_usd ?? p.total_usd ?? 0);
+  const pendienteBs = Number(p.saldo_pendiente_bs ?? p.pendiente_bs ?? p.total_bs ?? 0);
+  const sinSaldo = checkoutSinSaldoPendiente(p);
   let totalDestacado;
-  if (moneda === "bs") {
+  if (sinSaldo) {
+    totalDestacado = `<p class="text-emerald-700 font-medium">✅ El huésped pagó el total por adelantado. No hay saldo pendiente.</p>`;
+  } else if (moneda === "bs") {
     totalDestacado = `<strong>Saldo a cobrar: ${formatBs(pendienteBs)}</strong>
       <p class="text-xs text-slate-500">Tasa ${p.tasa_tipo?.toUpperCase()}: ${Number(p.tasa_aplicada || 0).toFixed(2)} Bs/USD · equivalente ${formatUsd(pendienteUsd)}</p>`;
   } else if (moneda === "mixto") {
@@ -766,8 +806,8 @@ function renderPreview(p, moneda = "usd") {
          </li>`
       : `<li class="text-xs text-slate-500">Salida ${p.hora_salida || p.hora_salida_estandar || "13:00"} · sin recargo</li>`;
 
-  const abonadoUsd = Number(p.pagado_parcial_usd || 0);
-  const abonadoBs = Number(p.pagado_parcial_bs || 0);
+  const abonadoUsd = Number(p.pagado_por_adelantado_usd ?? p.pagado_parcial_usd ?? 0);
+  const abonadoBs = Number(p.pagado_por_adelantado_bs ?? p.pagado_parcial_bs ?? 0);
   const abono =
     abonadoUsd > 0 || abonadoBs > 0
       ? `<li class="text-emerald-700">💰 Pagado por adelantado:
@@ -800,9 +840,9 @@ async function confirmarCheckout(event) {
   const formData = new FormData(els.formCheckout);
   const habId = Number(formData.get("habitacion_id"));
   const { clave, moneda } = opcionActual();
+  const sinSaldo = checkoutSinSaldoPendiente(ultimoPreviewCheckout);
 
   const payload = {
-    opcion_pago: clave,
     tasa_tipo:
       moneda === "bs" || moneda === "mixto"
         ? formData.get("tasa_tipo") || "bcv"
@@ -811,14 +851,19 @@ async function confirmarCheckout(event) {
     notas: formData.get("notas")?.toString() || null,
     hora_salida: formData.get("hora_salida")?.toString() || "13:00",
   };
-  if (moneda === "mixto") {
-    payload.monto_recibido_usd = Number(formData.get("monto_recibido_usd") || 0);
-    payload.monto_recibido_bs = Number(formData.get("monto_recibido_bs") || 0);
+  if (!sinSaldo) {
+    payload.opcion_pago = clave;
+    if (moneda === "mixto") {
+      payload.monto_recibido_usd = Number(formData.get("monto_recibido_usd") || 0);
+      payload.monto_recibido_bs = Number(formData.get("monto_recibido_bs") || 0);
+    }
   }
   try {
     const resp = await post(`/habitaciones/${habId}/checkout`, payload);
     let msg;
-    if (moneda === "usd") {
+    if (sinSaldo) {
+      msg = "Salida confirmada · Sin cobro adicional (total pagado por adelantado)";
+    } else if (moneda === "usd") {
       msg = `Check-out OK · Cobrado ${formatUsd(resp.total_usd)} en USD`;
     } else if (moneda === "bs") {
       msg = `Check-out OK · Cobrado ${formatBs(resp.total_bs)} (tasa ${resp.tasa_tipo?.toUpperCase()})`;

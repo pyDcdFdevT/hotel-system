@@ -1005,13 +1005,15 @@ def test_pago_anticipado_checkin(client):
     ).json()
     assert float(preview["pagado_parcial_usd"]) == 20.0
     assert float(preview["pendiente_usd"]) == 0.0
+    assert float(preview["saldo_pendiente_usd"]) == 0.0
+    assert preview["pago_completo_adelantado"] is True
     assert float(preview["total_usd"]) == 20.0
     assert preview["estado_pago"] == "pagado"
 
-    # Cerrar check-out: el cobro en USD debe ser 0 (todo estaba pagado).
+    # Cerrar check-out sin método de pago (saldo 0).
     cierre = client.post(
         f"/api/habitaciones/{hab['id']}/checkout",
-        json={"opcion_pago": "efectivo_usd"},
+        json={},
     )
     assert cierre.status_code == 200, cierre.text
     body = cierre.json()
@@ -1055,6 +1057,17 @@ def test_pago_anticipado_parcial(client):
         json={"opcion_pago": "efectivo_usd"},
     ).json()
     assert abs(float(cierre["total_usd"]) - esperado_pendiente) < 0.01
+
+
+def test_checkout_sin_metodo_rechazado_si_hay_saldo(client):
+    """Con saldo pendiente debe enviarse opcion_pago o moneda/metodo explícitos."""
+    hab = _habitacion_disponible(client)
+    client.post(
+        f"/api/habitaciones/{hab['id']}/checkin",
+        json={"huesped": "Sin Metodo Checkout", "noches": 1},
+    )
+    resp = client.post(f"/api/habitaciones/{hab['id']}/checkout", json={})
+    assert resp.status_code == 400, resp.text
 
 
 # ---------------------------------------------------------------------------

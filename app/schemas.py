@@ -157,6 +157,9 @@ class HabitacionCheckoutRequest(BaseModel):
     El frontend envía ``opcion_pago`` (botones combinados) y el backend lo mapea
     a ``moneda_pago`` + ``metodo_pago``. Para compatibilidad con clientes antiguos
     también se aceptan ``moneda_pago`` / ``metodo_pago`` por separado.
+
+    Si el saldo pendiente es 0 (todo pagado por adelantado), ``opcion_pago`` puede
+    omitirse: el cierre no registra cobro adicional.
     """
 
     opcion_pago: Optional[str] = Field(default=None, max_length=30)
@@ -209,6 +212,14 @@ class HabitacionCheckoutPreview(BaseModel):
     # Saldo pendiente tras restar el pago anticipado del total.
     pendiente_usd: Decimal = Decimal("0")
     pendiente_bs: Decimal = Decimal("0")
+    # Alias explícitos para UI / integraciones (mismo valor que pagado_parcial_* y pendiente_*).
+    pagado_por_adelantado_usd: Decimal = Decimal("0")
+    pagado_por_adelantado_bs: Decimal = Decimal("0")
+    # Saldo a cobrar (total estadía + consumos + recargo - adelanto); alias de pendiente_*.
+    saldo_pendiente_usd: Decimal = Decimal("0")
+    saldo_pendiente_bs: Decimal = Decimal("0")
+    # True si no queda nada por cobrar (adelanto cubre el total).
+    pago_completo_adelantado: bool = False
 
 
 class ReservaOut(ORMModel):

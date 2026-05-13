@@ -483,6 +483,12 @@ def _calcular_preview(
         pendiente_usd = Decimal("0")
     pendiente_bs = (pendiente_usd * tasa_aplicada).quantize(Decimal("0.01"))
 
+    pagado_por_adelantado_usd = pagado_parcial_usd
+    pagado_por_adelantado_bs = pagado_parcial_bs
+    saldo_pendiente_usd = pendiente_usd
+    saldo_pendiente_bs = pendiente_bs
+    pago_completo_adelantado = pendiente_usd <= Decimal("0") and pendiente_bs <= Decimal("0")
+
     return HabitacionCheckoutPreview(
         habitacion_id=habitacion.id,
         numero=habitacion.numero,
@@ -508,6 +514,11 @@ def _calcular_preview(
         estado_pago=estado_pago,
         pendiente_usd=pendiente_usd,
         pendiente_bs=pendiente_bs,
+        pagado_por_adelantado_usd=pagado_por_adelantado_usd,
+        pagado_por_adelantado_bs=pagado_por_adelantado_bs,
+        saldo_pendiente_usd=saldo_pendiente_usd,
+        saldo_pendiente_bs=saldo_pendiente_bs,
+        pago_completo_adelantado=pago_completo_adelantado,
     )
 
 
@@ -572,9 +583,6 @@ def checkout(
     data: HabitacionCheckoutRequest,
     db: Session = Depends(get_db),
 ):
-    moneda_pago, metodo_pago = _resolver_opcion_pago(
-        data.opcion_pago, data.moneda_pago, data.metodo_pago
-    )
     tasa_tipo = (data.tasa_tipo or "bcv").lower().strip()
     if tasa_tipo not in TIPOS_TASA_VALIDOS:
         raise HTTPException(
@@ -606,36 +614,60 @@ def checkout(
         # S?lo cobramos el saldo pendiente (total - pago anticipado).
         cobro_usd = preview.pendiente_usd
         cobro_bs = preview.pendiente_bs
+        sin_saldo_pendiente = (cobro_usd <= Decimal("0")) and (cobro_bs <= Decimal("0"))
 
-        # Reparto del cobro entre USD y Bs seg?n la moneda elegida:
-        #   - usd  ? todo en d?lares (sin tasa).
-        #   - bs   ? todo en bol?vares (con tasa BCV o paralelo).
-        #   - mixto ? respeta lo que el usuario haya ingresado en
-        #             monto_recibido_usd / monto_recibido_bs; lo no cubierto en
-        #             USD se completa con Bs a la tasa aplicada.
-        if moneda_pago == "usd":
-            pagado_usd_total = cobro_usd
-            pagado_bs_total = Decimal("0")
-        elif moneda_pago == "bs":
+        if not sin_saldo_pendiente:
+            if (
+                not data.opcion_pago
+                and data.moneda_pago is None
+                and data.metodo_pago is None
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Debe indicar opcion_pago (o moneda_pago/metodo_pago) "
+                        "para cobrar el saldo pendiente."
+                    ),
+                )
+
+        if sin_saldo_pendiente:
+            moneda_pago = "usd"
+            metodo_pago = "adelantado"
             pagado_usd_total = Decimal("0")
-            pagado_bs_total = cobro_bs
-        else:  # mixto
-            pagado_usd_total = Decimal(data.monto_recibido_usd or 0).quantize(Decimal("0.01"))
-            # Lo que falta en USD se cobra en Bs a la tasa aplicada.
-            faltante_usd = (cobro_usd - pagado_usd_total).quantize(Decimal("0.01"))
-            if faltante_usd < 0:
-                faltante_usd = Decimal("0")
-            pagado_bs_total = (faltante_usd * preview.tasa_aplicada).quantize(Decimal("0.01"))
-            # Si el cliente indic? expl?citamente bol?vares recibidos,
-            # respetamos ese valor (debe coincidir con el faltante).
-            if data.monto_recibido_bs and Decimal(data.monto_recibido_bs) > 0:
-                pagado_bs_total = Decimal(data.monto_recibido_bs).quantize(Decimal("0.01"))
+            pagado_bs_total = Decimal("0")
+        else:
+            moneda_pago, metodo_pago = _resolver_opcion_pago(
+                data.opcion_pago, data.moneda_pago, data.metodo_pago
+            )
+            # Reparto del cobro entre USD y Bs seg?n la moneda elegida:
+            #   - usd  ? todo en d?lares (sin tasa).
+            #   - bs   ? todo en bol?vares (con tasa BCV o paralelo).
+            #   - mixto ? respeta lo que el usuario haya ingresado en
+            #             monto_recibido_usd / monto_recibido_bs; lo no cubierto en
+            #             USD se completa con Bs a la tasa aplicada.
+            if moneda_pago == "usd":
+                pagado_usd_total = cobro_usd
+                pagado_bs_total = Decimal("0")
+            elif moneda_pago == "bs":
+                pagado_usd_total = Decimal("0")
+                pagado_bs_total = cobro_bs
+            else:  # mixto
+                pagado_usd_total = Decimal(data.monto_recibido_usd or 0).quantize(Decimal("0.01"))
+                # Lo que falta en USD se cobra en Bs a la tasa aplicada.
+                faltante_usd = (cobro_usd - pagado_usd_total).quantize(Decimal("0.01"))
+                if faltante_usd < 0:
+                    faltante_usd = Decimal("0")
+                pagado_bs_total = (faltante_usd * preview.tasa_aplicada).quantize(Decimal("0.01"))
+                # Si el cliente indic? expl?citamente bol?vares recibidos,
+                # respetamos ese valor (debe coincidir con el faltante).
+                if data.monto_recibido_bs and Decimal(data.monto_recibido_bs) > 0:
+                    pagado_bs_total = Decimal(data.monto_recibido_bs).quantize(Decimal("0.01"))
 
         ahora = caracas_now()
         for pedido in pedidos_abiertos:
             pedido.estado = "pagado"
             pedido.metodo_pago = metodo_pago
-            pedido.cuenta_banco_id = data.cuenta_banco_id
+            pedido.cuenta_banco_id = None if sin_saldo_pendiente else data.cuenta_banco_id
             if moneda_pago == "usd":
                 pedido.pagado_usd = Decimal(pedido.total_usd or 0)
                 pedido.pagado_bs = Decimal("0")
@@ -669,7 +701,8 @@ def checkout(
             reserva.horas_extra = int(preview.horas_extra or 0)
             reserva.recarga_extra_usd = preview.recarga_extra_usd
             reserva.recarga_extra_bs = preview.recarga_extra_bs
-            reserva.metodo_pago = metodo_pago
+            if not sin_saldo_pendiente:
+                reserva.metodo_pago = metodo_pago
             reserva.estado_pago = "pagado"
             reserva.updated_at = ahora
 
@@ -685,6 +718,12 @@ def checkout(
                 "total_usd": pagado_usd_total if moneda_pago != "bs" else cobro_usd,
                 "total_bs": pagado_bs_total if moneda_pago != "usd" else cobro_bs,
                 "estado_pago": "pagado",
+                "pendiente_usd": Decimal("0"),
+                "pendiente_bs": Decimal("0"),
+                "saldo_pendiente_usd": Decimal("0"),
+                "saldo_pendiente_bs": Decimal("0"),
+                "pago_completo_adelantado": sin_saldo_pendiente
+                and preview.pago_completo_adelantado,
             }
         )
         return preview_resp
