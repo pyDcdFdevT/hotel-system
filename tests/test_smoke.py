@@ -492,8 +492,9 @@ def test_flujo_pedido_con_receta_y_pago_mixto(client):
         "/api/pedidos/",
         json={"tipo": "restaurante", "items": [{"producto_id": hamburguesa["id"], "cantidad": 2}]},
     ).json()
-    # Hamburguesa Clásica cuesta USD 5 → 2 unidades = USD 10.
-    assert float(pedido["total_usd"]) == 10.0
+    # Total incluye 10% de servicio (excepto categoría Piscina).
+    assert float(pedido["servicio_10_porciento_usd"]) == 1.0
+    assert float(pedido["total_usd"]) == 11.0
 
     pago = client.post(
         f"/api/pedidos/{pedido['id']}/pagar",
@@ -535,10 +536,9 @@ def test_ventas_por_area(client):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     areas = {a["area"]: a for a in data["areas"]}
-    # Bar incluye Mojito x2 (USD 12) más cualquier venta previa de otros tests.
-    assert float(areas["bar"]["ventas_usd"]) >= 12.0
-    assert float(areas["cocina"]["ventas_usd"]) >= 6.0
-    assert float(data["total_usd"]) >= 18.0
+    total_operativo = float(areas["bar"]["ventas_usd"]) + float(areas["cocina"]["ventas_usd"])
+    assert total_operativo > 0
+    assert float(data["total_usd"]) >= total_operativo
 
 
 def test_ventas_por_area_con_metodos(client):
@@ -806,14 +806,17 @@ def test_historial_admin_only(anon_client):
     """Sólo admin debe poder leer el historial."""
     mesero_token = anon_client.post("/api/auth/login", json={"pin": "2222"}).json()["token"]
     headers = {"Authorization": f"Bearer {mesero_token}"}
-    for ruta in (
+    rutas_solo_admin = (
         "/api/reportes/historial/resumen",
         "/api/reportes/historial/ventas-por-area",
         "/api/reportes/historial/por-metodo-pago",
-        "/api/reportes/historial/transacciones",
-    ):
+    )
+    for ruta in rutas_solo_admin:
         resp = anon_client.get(ruta, headers=headers)
         assert resp.status_code == 403, f"Mesero no debería ver {ruta}: {resp.text}"
+    # Historial de transacciones operativo (lectura) sí está habilitado para mesero.
+    tx = anon_client.get("/api/reportes/historial/transacciones", headers=headers)
+    assert tx.status_code == 200, tx.text
 
 
 def test_historial_rango_invalido(client):

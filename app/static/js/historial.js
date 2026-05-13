@@ -179,7 +179,7 @@ function renderTabla(data) {
   if (!tbody) return;
   state.total = data.total || 0;
   if (!data.items?.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state">Sin transacciones en este período.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">Sin transacciones en este período.</div></td></tr>`;
     setText("hist-paginacion-info", "0 de 0");
     return;
   }
@@ -212,6 +212,7 @@ function renderTabla(data) {
             : "badge-success";
       return `
         <tr>
+          <td><span class="badge-id">#${tx.id}</span></td>
           <td class="text-xs whitespace-nowrap">${fecha}</td>
           <td><span class="badge ${badge.clase}">${badge.etiqueta}</span></td>
           <td>${area}</td>

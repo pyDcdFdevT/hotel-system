@@ -30,11 +30,12 @@ function badgeEstado(estado) {
 }
 
 function renderPedidoCard(pedido, area) {
-  const ref = pedido.mesa
+  const refCuenta = pedido.mesa
     ? `Mesa ${pedido.mesa}`
     : pedido.habitacion_numero
-      ? `Hab. ${pedido.habitacion_numero}`
-      : `Pedido #${pedido.id}`;
+      ? `Hab ${pedido.habitacion_numero}`
+      : "Sin referencia";
+  const ref = `Pedido #${pedido.id} · ${refCuenta}`;
   const detalles = (pedido.detalles || [])
     .map(
       (d) => `
@@ -50,7 +51,7 @@ function renderPedidoCard(pedido, area) {
       <div class="supervision-card-head">
         <div>
           <p class="supervision-card-title">${escapeHtml(ref)}</p>
-          <p class="text-xs text-slate-500">Pedido #${pedido.id}</p>
+          <p class="text-xs text-slate-500">${area === "cocina" ? "Área Cocina" : "Área Barra"}</p>
         </div>
         <span class="text-xs text-slate-500">${pedido.creado_en ? formatFechaHoraVe(pedido.creado_en) : "-"}</span>
       </div>

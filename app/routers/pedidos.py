@@ -47,6 +47,7 @@ router = APIRouter(prefix="/pedidos", tags=["pedidos"])
 
 TIPOS_VALIDOS = {"restaurante", "bar", "habitacion", "general"}
 METODOS_VALIDOS = {
+    "efectivo",
     "bs",
     "usd",
     "mixto",
@@ -60,13 +61,45 @@ TIPOS_TASA_VALIDOS = {"bcv", "paralelo"}
 def _cargar_pedido(db: Session, pedido_id: int) -> Pedido:
     pedido = (
         db.query(Pedido)
-        .options(joinedload(Pedido.detalles))
+        .options(joinedload(Pedido.detalles).joinedload(DetallePedido.producto))
         .filter(Pedido.id == pedido_id)
         .first()
     )
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return pedido
+
+
+def _q2(valor: Decimal) -> Decimal:
+    return Decimal(valor or 0).quantize(Decimal("0.01"))
+
+
+def _es_piscina(producto: Optional[Producto]) -> bool:
+    if not producto:
+        return False
+    return (producto.categoria or "").strip().lower() == "piscina"
+
+
+def _recalcular_totales_con_servicio(pedido: Pedido) -> None:
+    subtotal_bs = Decimal("0")
+    subtotal_usd = Decimal("0")
+    base_servicio_bs = Decimal("0")
+    base_servicio_usd = Decimal("0")
+    for det in pedido.detalles or []:
+        sub_bs = Decimal(det.subtotal_bs or 0)
+        sub_usd = Decimal(det.subtotal_usd or 0)
+        subtotal_bs += sub_bs
+        subtotal_usd += sub_usd
+        if not _es_piscina(det.producto):
+            base_servicio_bs += sub_bs
+            base_servicio_usd += sub_usd
+
+    servicio_bs = _q2(base_servicio_bs * Decimal("0.10"))
+    servicio_usd = _q2(base_servicio_usd * Decimal("0.10"))
+    pedido.servicio_10_porciento_bs = servicio_bs
+    pedido.servicio_10_porciento_usd = servicio_usd
+    pedido.total_bs = _q2(subtotal_bs + servicio_bs)
+    pedido.total_usd = _q2(subtotal_usd + servicio_usd)
 
 
 @router.get("/", response_model=List[PedidoOut])
@@ -553,9 +586,6 @@ def crear_pedido(data: PedidoCreate, db: Session = Depends(get_db)):
         db.add(pedido)
         db.flush()
 
-        total_bs = Decimal("0")
-        total_usd = Decimal("0")
-
         for item in data.items:
             producto = db.query(Producto).filter(Producto.id == item.producto_id).first()
             if not producto:
@@ -589,11 +619,9 @@ def crear_pedido(data: PedidoCreate, db: Session = Depends(get_db)):
                 subtotal_usd=subtotal_usd,
             )
             db.add(detalle)
-            total_bs += subtotal_bs
-            total_usd += subtotal_usd
-
-        pedido.total_bs = total_bs
-        pedido.total_usd = total_usd
+        db.flush()
+        db.refresh(pedido)
+        _recalcular_totales_con_servicio(pedido)
         pedido.ultima_actividad = caracas_now()
         db.commit()
         return _cargar_pedido(db, pedido.id)
@@ -620,9 +648,6 @@ def agregar_items(pedido_id: int, data: PedidoCreate, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="Indique al menos un ítem para agregar")
 
     try:
-        total_bs = Decimal(pedido.total_bs or 0)
-        total_usd = Decimal(pedido.total_usd or 0)
-
         for item in data.items:
             producto = db.query(Producto).filter(Producto.id == item.producto_id).first()
             if not producto:
@@ -656,11 +681,9 @@ def agregar_items(pedido_id: int, data: PedidoCreate, db: Session = Depends(get_
                 subtotal_usd=subtotal_usd,
             )
             db.add(detalle)
-            total_bs += subtotal_bs
-            total_usd += subtotal_usd
-
-        pedido.total_bs = total_bs
-        pedido.total_usd = total_usd
+        db.flush()
+        db.refresh(pedido)
+        _recalcular_totales_con_servicio(pedido)
         pedido.updated_at = utc_now()
         pedido.ultima_actividad = caracas_now()
         if data.notas:
@@ -707,6 +730,7 @@ def pagar_pedido(pedido_id: int, data: PedidoPago, db: Session = Depends(get_db)
         if tasa <= 0:
             raise HTTPException(status_code=400, detail="Tasa de cambio inválida")
 
+        _recalcular_totales_con_servicio(pedido)
         # total_bs y total_usd son el MISMO monto en dos monedas. Usamos Bs como base.
         total_bs_total = Decimal(pedido.total_bs or 0)
 
@@ -726,19 +750,35 @@ def pagar_pedido(pedido_id: int, data: PedidoPago, db: Session = Depends(get_db)
                 detail=f"Pago insuficiente. Falta {faltante} Bs equivalente (tasa {tasa})",
             )
 
-        vuelto_total_bs = (pago_equivalente_bs - total_bs_total).quantize(Decimal("0.01"))
-        if pago_usd > 0 and vuelto_total_bs > 0:
-            vuelto_usd = (vuelto_total_bs / tasa).quantize(Decimal("0.01")) if tasa > 0 else Decimal("0")
-            vuelto_bs = Decimal("0")
-        else:
-            vuelto_usd = Decimal("0")
-            vuelto_bs = vuelto_total_bs
+        excedente_bs = (pago_equivalente_bs - total_bs_total).quantize(Decimal("0.01"))
+        propina_bs = Decimal("0")
+        propina_usd = Decimal("0")
+        if excedente_bs > 0:
+            # Regla solicitada: cualquier sobrepago se registra como propina/redondeo a favor.
+            if pago_usd > 0 and pago_bs == 0:
+                propina_usd = (excedente_bs / tasa).quantize(Decimal("0.01")) if tasa > 0 else Decimal("0")
+            else:
+                propina_bs = excedente_bs
+        vuelto_bs = Decimal("0")
+        vuelto_usd = Decimal("0")
 
         pedido.pagado_bs = pago_bs
         pedido.pagado_usd = pago_usd
+        pedido.propina_monto_bs = propina_bs
+        pedido.propina_monto_usd = propina_usd
         pedido.vuelto_bs = vuelto_bs
         pedido.vuelto_usd = vuelto_usd
-        pedido.metodo_pago = data.metodo_pago
+        metodo_bs = (data.metodo_pago_bs or "").strip().lower() or None
+        metodo_usd = (data.metodo_pago_usd or "").strip().lower() or None
+        if metodo_bs or metodo_usd:
+            partes = []
+            if metodo_usd:
+                partes.append(f"usd:{metodo_usd}")
+            if metodo_bs:
+                partes.append(f"bs:{metodo_bs}")
+            pedido.metodo_pago = " | ".join(partes)
+        else:
+            pedido.metodo_pago = data.metodo_pago
         pedido.tasa_usd_del_dia = tasa
         pedido.estado = "pagado"
         pedido.updated_at = utc_now()
@@ -1000,8 +1040,6 @@ def actualizar_items(
             db.delete(det)
         db.flush()
 
-        total_bs = Decimal("0")
-        total_usd = Decimal("0")
         for prod_id, cant in nuevos.items():
             producto = db.query(Producto).filter(Producto.id == prod_id).first()
             if not producto:
@@ -1024,11 +1062,9 @@ def actualizar_items(
                     subtotal_usd=subtotal_usd,
                 )
             )
-            total_bs += subtotal_bs
-            total_usd += subtotal_usd
-
-        pedido.total_bs = total_bs
-        pedido.total_usd = total_usd
+        db.flush()
+        db.refresh(pedido)
+        _recalcular_totales_con_servicio(pedido)
         pedido.updated_at = utc_now()
         pedido.ultima_actividad = caracas_now()
         if data.notas is not None:

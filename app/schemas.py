@@ -357,7 +357,9 @@ class PedidoCreate(BaseModel):
 
 
 class PedidoPago(BaseModel):
-    metodo_pago: str = Field(..., max_length=30)
+    metodo_pago: str = Field(default="mixto", max_length=30)
+    metodo_pago_usd: Optional[str] = Field(default=None, max_length=30)
+    metodo_pago_bs: Optional[str] = Field(default=None, max_length=30)
     monto_bs: Decimal = Field(default=Decimal("0"), ge=0)
     monto_usd: Decimal = Field(default=Decimal("0"), ge=0)
     cuenta_banco_id: Optional[int] = Field(default=None, gt=0)
@@ -466,8 +468,12 @@ class PedidoOut(ORMModel):
     tasa_usd_del_dia: Decimal
     total_bs: Decimal
     total_usd: Decimal
+    servicio_10_porciento_bs: Decimal = Decimal("0")
+    servicio_10_porciento_usd: Decimal = Decimal("0")
     pagado_bs: Decimal
     pagado_usd: Decimal
+    propina_monto_bs: Decimal = Decimal("0")
+    propina_monto_usd: Decimal = Decimal("0")
     vuelto_bs: Decimal
     vuelto_usd: Decimal
     metodo_pago: Optional[str] = None

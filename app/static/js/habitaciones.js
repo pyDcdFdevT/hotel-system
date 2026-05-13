@@ -92,6 +92,7 @@ const OPCIONES_PAGO = {
 let habitaciones = [];
 // Mapa habitacion_id -> reserva activa (para mostrar info del huésped en la tarjeta).
 let reservasActivasPorHab = {};
+let pedidosPreviewMeta = {};
 
 export async function initHabitaciones() {
   if (els.filtro) els.filtro.addEventListener("change", loadHabitaciones);
@@ -698,6 +699,7 @@ async function recargarPreviewCheckout() {
     const preview = await get(
       `/habitaciones/${habId}/checkout-preview?${params}`,
     );
+    pedidosPreviewMeta = await cargarPedidosPreviewMeta(preview.pedidos || []);
     if (els.checkoutResumen) {
       els.checkoutResumen.innerHTML = renderPreview(preview, moneda);
     }
@@ -716,9 +718,32 @@ async function recargarPreviewCheckout() {
   }
 }
 
+async function cargarPedidosPreviewMeta(ids = []) {
+  const unicos = [...new Set((ids || []).map((x) => Number(x)).filter(Boolean))];
+  if (!unicos.length) return {};
+  const resultados = await Promise.all(
+    unicos.map(async (id) => {
+      try {
+        const p = await get(`/pedidos/${id}`);
+        const cuenta = p?.mesa
+          ? `Mesa ${p.mesa}`
+          : p?.habitacion_numero
+            ? `Hab ${p.habitacion_numero}`
+            : "General";
+        return [id, `Pedido #${id} - ${cuenta}`];
+      } catch (_error) {
+        return [id, `Pedido #${id}`];
+      }
+    }),
+  );
+  return Object.fromEntries(resultados);
+}
+
 function renderPreview(p, moneda = "usd") {
   const pedidos = p.pedidos?.length
-    ? `<p class="text-xs text-slate-500">Pedidos asociados: ${p.pedidos.map((id) => `#${id}`).join(", ")}</p>`
+    ? `<p class="text-xs text-slate-500">Consumos asociados: ${p.pedidos
+        .map((id) => pedidosPreviewMeta[id] || `Pedido #${id}`)
+        .join(", ")}</p>`
     : "";
   const pendienteUsd = Number(p.pendiente_usd ?? p.total_usd ?? 0);
   const pendienteBs = Number(p.pendiente_bs ?? p.total_bs ?? 0);

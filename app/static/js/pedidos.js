@@ -74,6 +74,8 @@ const els = {
   carrito: document.getElementById("pos-carrito"),
   totalBs: document.getElementById("pos-total-bs"),
   totalUsd: document.getElementById("pos-total-usd"),
+  servicioBs: document.getElementById("pos-servicio-bs"),
+  servicioUsd: document.getElementById("pos-servicio-usd"),
   tasa: document.getElementById("pos-tasa"),
   btnVaciar: document.getElementById("pos-btn-vaciar"),
   btnCobrar: document.getElementById("pos-btn-cobrar"),
@@ -94,9 +96,15 @@ const els = {
   pagoCancelar: document.getElementById("pago-cancelar"),
   pagoResumen: document.getElementById("pago-resumen"),
   cuentaPago: document.getElementById("pago-cuenta"),
-  pagoMetodo: document.getElementById("pago-metodo"),
+  pagoMetodoUsd: document.getElementById("pago-metodo-usd"),
+  pagoMetodoBs: document.getElementById("pago-metodo-bs"),
+  pagoMontoUsd: document.getElementById("pago-monto-usd"),
+  pagoMontoBs: document.getElementById("pago-monto-bs"),
   pagoTasaTipo: document.getElementById("pago-tasa-tipo"),
   pagoTasaInfo: document.getElementById("pago-tasa-info"),
+  pagoTotalConvertidoBs: document.getElementById("pago-total-convertido-bs"),
+  pagoTotalConvertidoUsd: document.getElementById("pago-total-convertido-usd"),
+  pagoPropinaPreview: document.getElementById("pago-propina-preview"),
 };
 
 let cuentasRefreshTimer = null;
@@ -131,7 +139,8 @@ export async function initPedidos() {
       actualizarInfoTasa();
     });
   }
-  if (els.pagoMetodo) els.pagoMetodo.addEventListener("change", actualizarInfoTasa);
+  if (els.pagoMontoUsd) els.pagoMontoUsd.addEventListener("input", actualizarInfoTasa);
+  if (els.pagoMontoBs) els.pagoMontoBs.addEventListener("input", actualizarInfoTasa);
 
   document.addEventListener("tasas:actualizadas", actualizarTasasCache);
 
@@ -190,10 +199,24 @@ function actualizarInfoTasa() {
   const total_bs = Number(state.pedidoActivo.total_bs || 0);
   const total_usd = Number(state.pedidoActivo.total_usd || 0);
   const equivalente_bs = total_usd * tasa;
+  const montoUsd = Number(els.pagoMontoUsd?.value || 0);
+  const montoBs = Number(els.pagoMontoBs?.value || 0);
+  const pagadoEquivBs = montoBs + montoUsd * tasa;
+  const propinaBs = Math.max(0, pagadoEquivBs - total_bs);
+  const propinaUsd = tasa > 0 ? propinaBs / tasa : 0;
   els.pagoTasaInfo.innerHTML = `
     Tasa ${state.tasaTipo.toUpperCase()}: <strong>${formatRate(tasa)} Bs/USD</strong> ·
     Equivalente: ${formatBs(equivalente_bs || total_bs)}
   `;
+  if (els.pagoTotalConvertidoBs) {
+    els.pagoTotalConvertidoBs.textContent = formatBs(pagadoEquivBs);
+  }
+  if (els.pagoTotalConvertidoUsd) {
+    els.pagoTotalConvertidoUsd.textContent = formatUsd(tasa > 0 ? pagadoEquivBs / tasa : 0);
+  }
+  if (els.pagoPropinaPreview) {
+    els.pagoPropinaPreview.textContent = `${formatBs(propinaBs)} / ${formatUsd(propinaUsd)}`;
+  }
 }
 
 function actualizarHora() {
@@ -884,11 +907,22 @@ function vaciarCarrito() {
 function totalesCarrito() {
   let totalBs = 0;
   let totalUsd = 0;
+  let baseServicioBs = 0;
+  let baseServicioUsd = 0;
   for (const item of state.carrito.values()) {
-    totalBs += Number(item.producto.precio_bs) * item.cantidad;
-    totalUsd += Number(item.producto.precio_usd) * item.cantidad;
+    const subBs = Number(item.producto.precio_bs) * item.cantidad;
+    const subUsd = Number(item.producto.precio_usd) * item.cantidad;
+    totalBs += subBs;
+    totalUsd += subUsd;
+    const esPiscina = (item.producto.categoria || "").toLowerCase() === "piscina";
+    if (!esPiscina) {
+      baseServicioBs += subBs;
+      baseServicioUsd += subUsd;
+    }
   }
-  return { totalBs, totalUsd };
+  const servicioBs = baseServicioBs * 0.1;
+  const servicioUsd = baseServicioUsd * 0.1;
+  return { totalBs, totalUsd, servicioBs, servicioUsd };
 }
 
 function refrescarUI() {
@@ -900,9 +934,15 @@ function refrescarUI() {
 
 function renderPedidoInfo() {
   if (!els.pedidoTitulo) return;
-  const mesa = state.mesaActiva || (state.pedidoActivo?.mesa ?? "—");
+  const nombreCuenta =
+    state.pedidoActivo?.mesa ||
+    (state.pedidoActivo?.habitacion_numero
+      ? `Hab ${state.pedidoActivo.habitacion_numero}`
+      : state.mesaActiva || "—");
   els.pedidoTitulo.textContent = hayCuentaActiva()
-    ? `🟢 Cuenta activa: ${mesa}`
+    ? state.pedidoActivo?.id
+      ? `Pedido #${state.pedidoActivo.id} · ${nombreCuenta}`
+      : `🟢 Nueva cuenta · ${nombreCuenta}`
     : "⚫ Sin cuenta activa";
   if (els.pedidoInfo) {
     if (state.pedidoActivo) {
@@ -932,15 +972,18 @@ function renderPedidoInfo() {
 function actualizarBannerCuenta() {
   if (!els.banner || !els.bannerText) return;
   if (hayCuentaActiva()) {
-    const etiqueta =
-      state.mesaActiva ||
-      (state.habitacionNumero
-        ? `Hab ${state.habitacionNumero}`
-        : `Pedido #${state.pedidoActivo?.id}`);
+    const nombreCuenta =
+      state.pedidoActivo?.mesa ||
+      (state.pedidoActivo?.habitacion_numero
+        ? `Hab ${state.pedidoActivo.habitacion_numero}`
+        : state.mesaActiva || "Cuenta");
+    const etiqueta = state.pedidoActivo?.id
+      ? `Pedido #${state.pedidoActivo.id} · ${nombreCuenta}`
+      : `Nueva cuenta · ${nombreCuenta}`;
     const desde = state.pedidoActivo?.fecha
       ? ` · abierta ${formatTimeVE(state.pedidoActivo.fecha)}`
       : " · sin guardar";
-    els.bannerText.textContent = `🟢 Cuenta activa: ${etiqueta}${desde}`;
+    els.bannerText.textContent = `🟢 ${etiqueta}${desde}`;
     els.banner.classList.remove("pos-banner-inactive");
     els.banner.classList.add("pos-banner-active");
     if (els.btnCancelarCuenta) els.btnCancelarCuenta.classList.remove("hidden");
@@ -1180,11 +1223,21 @@ function renderCarrito() {
     ),
   );
 
-  const { totalBs, totalUsd } = totalesCarrito();
+  const { totalBs, totalUsd, servicioBs, servicioUsd } = totalesCarrito();
   const servidorBs = Number(state.pedidoActivo?.total_bs || 0);
   const servidorUsd = Number(state.pedidoActivo?.total_usd || 0);
-  if (els.totalBs) els.totalBs.textContent = formatBs(totalBs + servidorBs);
-  if (els.totalUsd) els.totalUsd.textContent = formatUsd(totalUsd + servidorUsd);
+  const servidorServicioBs = Number(state.pedidoActivo?.servicio_10_porciento_bs || 0);
+  const servidorServicioUsd = Number(state.pedidoActivo?.servicio_10_porciento_usd || 0);
+  const totalConServicioBs = totalBs + servicioBs + servidorBs;
+  const totalConServicioUsd = totalUsd + servicioUsd + servidorUsd;
+  if (els.servicioBs) els.servicioBs.textContent = formatBs(servicioBs + servidorServicioBs);
+  if (els.servicioUsd) els.servicioUsd.textContent = formatUsd(servicioUsd + servidorServicioUsd);
+  if (els.totalBs) {
+    els.totalBs.textContent = formatBs(totalConServicioBs);
+  }
+  if (els.totalUsd) {
+    els.totalUsd.textContent = formatUsd(totalConServicioUsd);
+  }
 }
 
 /**
@@ -1304,8 +1357,10 @@ async function abrirModalPago() {
     const p = state.pedidoActivo;
     els.pagoResumen.innerHTML = `
       <p><strong>Pedido #${p.id}</strong> · ${p.mesa ? p.mesa : p.tipo}</p>
-      <p>Total Bs: ${formatBs(p.total_bs)}</p>
-      <p>Total USD: ${formatUsd(p.total_usd)}</p>
+      <p>Subtotal Bs: ${formatBs(Number(p.total_bs || 0) - Number(p.servicio_10_porciento_bs || 0))}</p>
+      <p>Subtotal USD: ${formatUsd(Number(p.total_usd || 0) - Number(p.servicio_10_porciento_usd || 0))}</p>
+      <p>+10% Servicio: ${formatUsd(p.servicio_10_porciento_usd || 0)} / ${formatBs(p.servicio_10_porciento_bs || 0)}</p>
+      <p><strong>Total Bs: ${formatBs(p.total_bs)} · Total USD: ${formatUsd(p.total_usd)}</strong></p>
     `;
   }
   els.formPago?.reset();
@@ -1326,12 +1381,16 @@ async function confirmarPago(event) {
   const formData = new FormData(els.formPago);
   const monto_bs = Number(formData.get("monto_bs") || 0);
   const monto_usd = Number(formData.get("monto_usd") || 0);
-  const metodo_pago = formData.get("metodo_pago") || "bs";
+  const metodo_pago_bs = formData.get("metodo_pago_bs") || "efectivo";
+  const metodo_pago_usd = formData.get("metodo_pago_usd") || "efectivo";
+  const metodo_pago = monto_bs > 0 && monto_usd > 0 ? "mixto" : monto_usd > 0 ? "usd" : "bs";
   const cuenta_banco_id = Number(formData.get("cuenta_banco_id")) || null;
   const tasa_tipo = formData.get("tasa_tipo") || state.tasaTipo || "bcv";
   try {
     const pedido = await post(`/pedidos/${state.pedidoActivo.id}/pagar`, {
       metodo_pago,
+      metodo_pago_bs,
+      metodo_pago_usd,
       monto_bs,
       monto_usd,
       cuenta_banco_id,
@@ -1340,7 +1399,11 @@ async function confirmarPago(event) {
     const vueltoBs = Number(pedido.vuelto_bs || 0);
     const vueltoUsd = Number(pedido.vuelto_usd || 0);
     let mensaje = `Pedido #${pedido.id} cobrado (${metodo_pago})`;
-    if (vueltoBs > 0 || vueltoUsd > 0) {
+    const propinaBs = Number(pedido.propina_monto_bs || 0);
+    const propinaUsd = Number(pedido.propina_monto_usd || 0);
+    if (propinaBs > 0 || propinaUsd > 0) {
+      mensaje += ` · Propina ${formatBs(propinaBs)} / ${formatUsd(propinaUsd)}`;
+    } else if (vueltoBs > 0 || vueltoUsd > 0) {
       mensaje += ` · Vuelto ${formatBs(vueltoBs)} / ${formatUsd(vueltoUsd)}`;
     }
     showToast(mensaje, "success");

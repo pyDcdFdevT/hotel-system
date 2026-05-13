@@ -399,6 +399,10 @@ def _migrar_pedidos_habitacion(engine) -> None:
             ("cancelado_por", "VARCHAR(100)"),
             ("cancelado_en", "TIMESTAMP"),
             ("ultima_actividad", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+            ("servicio_10_porciento_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
+            ("servicio_10_porciento_bs", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
+            ("propina_monto_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
+            ("propina_monto_bs", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
         )
         for nombre, tipo in anulacion:
             if nombre not in columnas:
