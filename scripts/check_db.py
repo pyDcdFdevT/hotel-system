@@ -2,7 +2,7 @@
 
 Funciones:
 
-1. Si ``HOTEL_DB_URL`` apunta a ``/data/hotel.db`` (Railway Volume), garantiza
+1. Si ``DATABASE_URL``/``HOTEL_DB_URL`` apunta a ``/data/hotel.db`` (Railway Volume), garantiza
    que el directorio ``/data`` exista.
 2. Aplica micro-migraciones idempotentes sobre SQLite:
    - Renombra cuentas antiguas ("BcoHLC", "BcoZ", ...) a los nuevos nombres
@@ -31,7 +31,7 @@ if str(ROOT) not in sys.path:
 
 
 def _ensure_data_dir() -> None:
-    db_url = os.getenv("HOTEL_DB_URL", "")
+    db_url = os.getenv("DATABASE_URL", "").strip() or os.getenv("HOTEL_DB_URL", "").strip()
     if not db_url.startswith("sqlite"):
         return
     parsed = urlparse(db_url)
@@ -314,15 +314,11 @@ def _seed_usuario_barra(engine) -> None:
 
            sqlite3.IntegrityError: NOT NULL constraint failed: usuarios.created_at
     """
-    if not _is_sqlite(engine):
-        return
-    from sqlalchemy import text
+    from sqlalchemy import inspect, text
 
     with engine.begin() as conn:
-        existe_tabla = conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'")
-        ).first()
-        if not existe_tabla:
+        inspector = inspect(conn)
+        if not inspector.has_table("usuarios"):
             return  # ``create_all`` aún no corrió; el seed se encargará.
 
         # ¿Ya existe por nombre?
@@ -616,6 +612,16 @@ def _actualizar_precio_habitaciones(engine) -> None:
             )
 
 
+def _run_step(name: str, fn, engine) -> None:
+    """Ejecuta una migración tolerando diferencias entre motores."""
+    try:
+        fn(engine)
+    except Exception as exc:
+        # No abortamos por micro-migraciones incompatibles entre motores;
+        # create_all + seed mantienen el sistema funcional.
+        print(f"[check_db] Aviso en paso '{name}': {exc}")
+
+
 def main() -> None:
     _ensure_data_dir()
 
@@ -624,23 +630,26 @@ def main() -> None:
     from app.models import Habitacion
     from app.seed import seed
 
-    _migrar_tasas_cambio(engine)
-    _renombrar_cuentas(engine)
-    _migrar_productos(engine)
-    _actualizar_precio_habitaciones(engine)
-    _migrar_estados_habitaciones(engine)
-    _migrar_pedidos_habitacion(engine)
-    _migrar_detalles_pedido_estado(engine)
-    _migrar_reservas_vehiculo(engine)
-    _migrar_favoritos_usuario(engine)
-    _seed_productos_piscina(engine)
+    backend = engine.url.get_backend_name()
+    print(f"[check_db] Motor detectado: {backend}")
+
+    _run_step("migrar_tasas_cambio", _migrar_tasas_cambio, engine)
+    _run_step("renombrar_cuentas", _renombrar_cuentas, engine)
+    _run_step("migrar_productos", _migrar_productos, engine)
+    _run_step("actualizar_precio_habitaciones", _actualizar_precio_habitaciones, engine)
+    _run_step("migrar_estados_habitaciones", _migrar_estados_habitaciones, engine)
+    _run_step("migrar_pedidos_habitacion", _migrar_pedidos_habitacion, engine)
+    _run_step("migrar_detalles_pedido_estado", _migrar_detalles_pedido_estado, engine)
+    _run_step("migrar_reservas_vehiculo", _migrar_reservas_vehiculo, engine)
+    _run_step("migrar_favoritos_usuario", _migrar_favoritos_usuario, engine)
+    _run_step("seed_productos_piscina", _seed_productos_piscina, engine)
 
     print("[check_db] Ejecutando create_all…")
     Base.metadata.create_all(bind=engine)
 
     # Asegurar el usuario "Barra" (PIN 4444) DESPUÉS de create_all para que la
     # tabla ``usuarios`` exista en bases recién creadas.
-    _seed_usuario_barra(engine)
+    _run_step("seed_usuario_barra", _seed_usuario_barra, engine)
 
     db = SessionLocal()
     try:
