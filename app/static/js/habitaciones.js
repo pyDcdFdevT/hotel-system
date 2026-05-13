@@ -53,7 +53,8 @@ const els = {
   checkoutMixtoUsd: document.getElementById("checkout-mixto-usd"),
   checkoutMixtoBs: document.getElementById("checkout-mixto-bs"),
   checkoutHora: document.getElementById("checkout-hora"),
-  checkoutMetodos: document.querySelector("#modal-checkout .checkout-metodos"),
+  /** Preferir ``obtenerCheckoutMetodosEl()`` en runtime (evita null si el DOM aún no existía). */
+  checkoutMetodos: document.querySelector("#form-checkout .checkout-metodos"),
   checkoutSubmitBtn: document.getElementById("checkout-submit-btn"),
 
   // Sub-formulario "pago anticipado" del check-in.
@@ -637,27 +638,68 @@ async function confirmarCheckin(event) {
 // ---------------------------------------------------------------------------
 // Check-out
 // ---------------------------------------------------------------------------
+function numSaldoCheckout(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** True si no hay nada que cobrar (API: ``saldo_pendiente_*`` o ``pendiente_*``). */
 function checkoutSinSaldoPendiente(p) {
   if (!p) return false;
-  const u = Number(p.saldo_pendiente_usd ?? p.pendiente_usd ?? 0);
-  const b = Number(p.saldo_pendiente_bs ?? p.pendiente_bs ?? 0);
+  const u = numSaldoCheckout(
+    p.saldo_pendiente_usd != null ? p.saldo_pendiente_usd : p.pendiente_usd,
+  );
+  const b = numSaldoCheckout(
+    p.saldo_pendiente_bs != null ? p.saldo_pendiente_bs : p.pendiente_bs,
+  );
   return u <= 0 && b <= 0;
 }
 
-/** Oculta métodos de pago y ajusta el botón cuando no hay saldo por cobrar. */
+function obtenerCheckoutMetodosEl() {
+  return (
+    els.formCheckout?.querySelector(".checkout-metodos") ||
+    document.querySelector("#modal-checkout .checkout-metodos") ||
+    document.querySelector(".checkout-metodos")
+  );
+}
+
+function obtenerCheckoutSubmitBtn() {
+  return (
+    document.getElementById("checkout-submit-btn") ||
+    els.formCheckout?.querySelector('button[type="submit"]')
+  );
+}
+
+/**
+ * Oculta/muestra métodos de pago y el texto del botón según saldo del preview.
+ * Usa ``hidden`` nativo + ``display`` + clase Tailwind por compatibilidad.
+ */
 function aplicarCheckoutMetodosUI(preview) {
-  const sinSaldo = checkoutSinSaldoPendiente(preview);
-  if (els.checkoutMetodos) {
-    if (!preview) els.checkoutMetodos.classList.remove("hidden");
-    else els.checkoutMetodos.classList.toggle("hidden", sinSaldo);
-  }
-  if (els.checkoutSubmitBtn) {
+  const wrap = obtenerCheckoutMetodosEl();
+  const btn = obtenerCheckoutSubmitBtn();
+  const sinSaldo = preview ? checkoutSinSaldoPendiente(preview) : false;
+
+  if (wrap) {
     if (!preview) {
-      els.checkoutSubmitBtn.textContent = "Cobrar y cerrar";
+      wrap.removeAttribute("hidden");
+      wrap.style.removeProperty("display");
+      wrap.classList.remove("hidden");
+    } else if (sinSaldo) {
+      wrap.setAttribute("hidden", "");
+      wrap.style.display = "none";
+      wrap.classList.add("hidden");
     } else {
-      els.checkoutSubmitBtn.textContent = sinSaldo
-        ? "Confirmar salida"
-        : "Cobrar y cerrar";
+      wrap.removeAttribute("hidden");
+      wrap.style.removeProperty("display");
+      wrap.classList.remove("hidden");
+    }
+  }
+
+  if (btn) {
+    if (!preview) {
+      btn.textContent = "Cobrar y cerrar";
+    } else {
+      btn.textContent = sinSaldo ? "Confirmar salida" : "Cobrar y cerrar";
     }
   }
 }
@@ -817,7 +859,7 @@ function renderPreview(p, moneda = "usd") {
          </li>`
       : "";
 
-  return `
+  const html = `
     <p><strong>Habitación #${p.numero}</strong>${p.huesped ? ` · ${p.huesped}` : ""}</p>
     <ul class="text-sm space-y-1 mt-2">
       <li>Estadía (${p.noches} noche${p.noches === 1 ? "" : "s"}): ${formatUsd(p.tarifa_usd)}${moneda !== "usd" ? ` · ${formatBs(p.tarifa_bs)}` : ""}</li>
@@ -829,6 +871,9 @@ function renderPreview(p, moneda = "usd") {
     </ul>
     ${pedidos}
   `;
+  // Tras pintar el resumen, alinear botones de pago con el saldo (por si el contenedor no se resolvió antes).
+  queueMicrotask(() => aplicarCheckoutMetodosUI(p));
+  return html;
 }
 
 function cerrarCheckout() {
