@@ -17,7 +17,9 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 from typing import Callable, Iterable, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
+
+UTC = timezone.utc
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
