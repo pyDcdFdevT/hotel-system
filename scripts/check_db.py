@@ -53,8 +53,19 @@ def _ensure_data_dir() -> None:
             print(f"[check_db] No se pudo crear {parent}: {exc}", file=sys.stderr)
 
 
-def _is_sqlite(engine) -> bool:
-    return engine.url.get_backend_name() == "sqlite"
+def _is_sqlite(bind) -> bool:
+    """Detecta SQLite en Engine o Connection de forma robusta."""
+    try:
+        name = bind.url.get_backend_name()
+    except Exception:
+        try:
+            name = bind.engine.url.get_backend_name()
+        except Exception:
+            try:
+                name = bind.dialect.name
+            except Exception:
+                name = ""
+    return str(name).lower() == "sqlite"
 
 
 def _migrar_tasas_cambio(engine) -> None:
@@ -314,6 +325,9 @@ def _seed_usuario_barra(engine) -> None:
 
            sqlite3.IntegrityError: NOT NULL constraint failed: usuarios.created_at
     """
+    if not _is_sqlite(engine):
+        # En PostgreSQL este paso no aplica; el seed normal cubre usuarios.
+        return
     from sqlalchemy import inspect, text
 
     with engine.begin() as conn:
@@ -612,14 +626,20 @@ def _actualizar_precio_habitaciones(engine) -> None:
             )
 
 
-def _run_step(name: str, fn, engine) -> None:
-    """Ejecuta una migración tolerando diferencias entre motores."""
+def _run_step(engine, step_name: str, step_func) -> None:
+    """Ejecuta un paso aislado, tolerando diferencias entre motores.
+
+    Cada paso corre en su propia transacción para que un fallo no deje
+    abortada la transacción de los siguientes pasos (importante en PostgreSQL).
+    """
     try:
-        fn(engine)
+        # Las funciones actuales ya encapsulan su propio ``engine.begin()``.
+        # Por eso invocarlas aquí con ``engine`` mantiene aislamiento por paso
+        # sin forzar transacciones anidadas incompatibles.
+        step_func(engine)
     except Exception as exc:
-        # No abortamos por micro-migraciones incompatibles entre motores;
-        # create_all + seed mantienen el sistema funcional.
-        print(f"[check_db] Aviso en paso '{name}': {exc}")
+        # No propagamos para mantener bootstrap resiliente.
+        print(f"[check_db] Aviso en paso '{step_name}': {exc}")
 
 
 def main() -> None:
@@ -633,23 +653,25 @@ def main() -> None:
     backend = engine.url.get_backend_name()
     print(f"[check_db] Motor detectado: {backend}")
 
-    _run_step("migrar_tasas_cambio", _migrar_tasas_cambio, engine)
-    _run_step("renombrar_cuentas", _renombrar_cuentas, engine)
-    _run_step("migrar_productos", _migrar_productos, engine)
-    _run_step("actualizar_precio_habitaciones", _actualizar_precio_habitaciones, engine)
-    _run_step("migrar_estados_habitaciones", _migrar_estados_habitaciones, engine)
-    _run_step("migrar_pedidos_habitacion", _migrar_pedidos_habitacion, engine)
-    _run_step("migrar_detalles_pedido_estado", _migrar_detalles_pedido_estado, engine)
-    _run_step("migrar_reservas_vehiculo", _migrar_reservas_vehiculo, engine)
-    _run_step("migrar_favoritos_usuario", _migrar_favoritos_usuario, engine)
-    _run_step("seed_productos_piscina", _seed_productos_piscina, engine)
+    # Orden de pasos robusto para Railway/producción.
+    _run_step(engine, "migrar_tasas_cambio", _migrar_tasas_cambio)
+    _run_step(engine, "renombrar_cuentas", _renombrar_cuentas)
+    _run_step(engine, "migrar_estados_habitaciones", _migrar_estados_habitaciones)
+    _run_step(engine, "migrar_productos", _migrar_productos)
+    _run_step(engine, "migrar_detalles_pedido_estado", _migrar_detalles_pedido_estado)
+    _run_step(engine, "migrar_favoritos_usuario", _migrar_favoritos_usuario)
+    _run_step(engine, "migrar_reservas_vehiculo", _migrar_reservas_vehiculo)
 
     print("[check_db] Ejecutando create_all…")
     Base.metadata.create_all(bind=engine)
 
-    # Asegurar el usuario "Barra" (PIN 4444) DESPUÉS de create_all para que la
-    # tabla ``usuarios`` exista en bases recién creadas.
-    _run_step("seed_usuario_barra", _seed_usuario_barra, engine)
+    # Asegurar el usuario "Barra" (PIN 4444) sólo en SQLite y sólo después
+    # de create_all, para garantizar que la tabla usuarios exista.
+    _run_step(engine, "seed_usuario_barra", _seed_usuario_barra)
+
+    # Pasos que pueden depender de tablas ya creadas.
+    _run_step(engine, "actualizar_precio_habitaciones", _actualizar_precio_habitaciones)
+    _run_step(engine, "seed_productos_piscina", _seed_productos_piscina)
 
     db = SessionLocal()
     try:
