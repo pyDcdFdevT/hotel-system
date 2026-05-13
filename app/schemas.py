@@ -477,6 +477,8 @@ class PedidoOut(ORMModel):
     anulado_motivo: Optional[str] = None
     anulado_por: Optional[str] = None
     anulado_en: Optional[datetime] = None
+    cancelado_por: Optional[str] = None
+    cancelado_en: Optional[datetime] = None
     ultima_actividad: Optional[datetime] = None
     detalles: List[DetallePedidoOut] = []
 
@@ -647,6 +649,8 @@ class TransaccionResumen(BaseModel):
     monto_usd: Decimal
     monto_bs: Decimal
     tipo: str
+    area: Optional[str] = None
+    estado: Optional[str] = None
     usuario_nombre: Optional[str] = None
 
 

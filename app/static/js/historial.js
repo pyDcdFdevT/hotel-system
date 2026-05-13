@@ -18,10 +18,13 @@ const state = {
   offset: 0,
   total: 0,
   cargando: false,
+  area: "todas",
+  estadoPedido: "todos",
 };
 
 const TX_BADGES = {
   checkout: { etiqueta: "Check-out", clase: "badge-info" },
+  habitaciones: { etiqueta: "Habitaciones", clase: "badge-info" },
   habitacion: { etiqueta: "Consumo hab.", clase: "badge-warning" },
   piscina: { etiqueta: "Piscina", clase: "badge-success" },
   bar: { etiqueta: "Bar", clase: "badge-info" },
@@ -176,7 +179,7 @@ function renderTabla(data) {
   if (!tbody) return;
   state.total = data.total || 0;
   if (!data.items?.length) {
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">Sin transacciones en este período.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state">Sin transacciones en este período.</div></td></tr>`;
     setText("hist-paginacion-info", "0 de 0");
     return;
   }
@@ -193,10 +196,26 @@ function renderTabla(data) {
       const accion = puedeAnular
         ? `<button data-id="${tx.id}" data-concepto="${(tx.concepto || "").replace(/"/g, "&quot;")}" class="btn-anular-venta px-2 py-0.5 text-xs rounded bg-red-100 text-red-700">Anular</button>`
         : "";
+      const area = tx.area || tx.tipo || "-";
+      const estado = (tx.estado || "pagado").toLowerCase();
+      const estadoLabel =
+        estado === "anulado"
+          ? "Anulado"
+          : estado === "cancelado"
+            ? "Cancelado"
+            : "Pagado";
+      const estadoClase =
+        estado === "anulado"
+          ? "badge-danger"
+          : estado === "cancelado"
+            ? "badge-warning"
+            : "badge-success";
       return `
         <tr>
           <td class="text-xs whitespace-nowrap">${fecha}</td>
           <td><span class="badge ${badge.clase}">${badge.etiqueta}</span></td>
+          <td>${area}</td>
+          <td><span class="badge ${estadoClase}">${estadoLabel}</span></td>
           <td>${tx.concepto || "-"}</td>
           <td class="text-right">${formatUsd(tx.monto_usd)}</td>
           <td class="text-right">${formatBs(tx.monto_bs)}</td>
@@ -273,6 +292,10 @@ async function recargar() {
     limite: String(state.limite),
     offset: String(state.offset),
   });
+  if (esAdmin()) {
+    txParams.set("area", state.area || "todas");
+    txParams.set("estado_pedido", state.estadoPedido || "todos");
+  }
   setText(
     "hist-rango-label",
     `${state.desde}  →  ${state.hasta}`,
@@ -347,6 +370,23 @@ export async function initHistorial() {
       state.offset += state.limite;
       recargar();
     });
+    const filtros = document.getElementById("filtros-admin");
+    const admin = esAdmin();
+    if (filtros) filtros.classList.toggle("hidden", !admin);
+    const selectArea = document.getElementById("hist-filtro-area");
+    const selectEstado = document.getElementById("hist-filtro-estado");
+    if (admin) {
+      selectArea?.addEventListener("change", () => {
+        state.area = selectArea.value || "todas";
+        state.offset = 0;
+        recargar();
+      });
+      selectEstado?.addEventListener("change", () => {
+        state.estadoPedido = selectEstado.value || "todos";
+        state.offset = 0;
+        recargar();
+      });
+    }
     _inicializado = true;
   }
   // Carga inicial: día actual.

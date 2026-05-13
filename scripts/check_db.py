@@ -442,6 +442,8 @@ def _migrar_pedidos_habitacion(engine) -> None:
             ("anulado_motivo", "VARCHAR(200)"),
             ("anulado_por", "VARCHAR(100)"),
             ("anulado_en", "DATETIME"),
+            ("cancelado_por", "VARCHAR(100)"),
+            ("cancelado_en", "DATETIME"),
             ("ultima_actividad", "DATETIME"),
         )
         for nombre, tipo in anulacion:
@@ -456,6 +458,14 @@ def _migrar_pedidos_habitacion(engine) -> None:
             text(
                 "UPDATE pedidos SET ultima_actividad = COALESCE(updated_at, fecha) "
                 "WHERE ultima_actividad IS NULL"
+            )
+        )
+        # Compatibilidad de estados: normaliza cualquier valor fuera del flujo
+        # actual para evitar errores de filtros/reportes en datos legacy.
+        conn.execute(
+            text(
+                "UPDATE pedidos SET estado = 'abierto' "
+                "WHERE estado NOT IN ('abierto','pagado','cargado','cancelado','anulado')"
             )
         )
         if "habitacion_numero" not in columnas:

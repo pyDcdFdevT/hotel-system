@@ -773,22 +773,69 @@ def historial_por_metodo_pago(
 @router.get(
     "/historial/transacciones",
     response_model=HistorialTransacciones,
-    dependencies=[_REPORTES_ADMIN],
+    dependencies=[_REPORTES_OPERATIVO],
 )
 def historial_transacciones(
     desde: Optional[date_type] = Query(default=None),
     hasta: Optional[date_type] = Query(default=None),
+    area: str = Query(default="todas"),
+    estado_pedido: str = Query(default="todos"),
     limite: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(require_roles("admin", "recepcion", "mesero")),
 ):
     inicio, fin = _rango_validado(desde, hasta)
     try:
-        pedidos = _pedidos_pagados_en_rango(db, inicio, fin)
-        reservas = _reservas_cerradas_en_rango(db, inicio, fin)
+        rol = (usuario.rol or "").lower().strip()
+        admin = rol == "admin"
+
+        area_filtro = (area or "todas").lower().strip()
+        estado_filtro = (estado_pedido or "todos").lower().strip()
+        areas_validas = {"habitaciones", "cocina", "bar", "piscina", "todas"}
+        estados_validos = {"pagado", "cancelado", "anulado", "todos"}
+        if admin and area_filtro not in areas_validas:
+            raise HTTPException(status_code=400, detail="Filtro 'area' inválido")
+        if admin and estado_filtro not in estados_validos:
+            raise HTTPException(status_code=400, detail="Filtro 'estado_pedido' inválido")
+
+        # Roles no admin: ignoran filtros del request.
+        if not admin:
+            area_filtro = "todas"
+            estado_filtro = "todos"
+
+        pedidos_query = (
+            db.query(Pedido)
+            .options(joinedload(Pedido.detalles).joinedload(DetallePedido.producto))
+            .filter(func.date(Pedido.updated_at) >= inicio)
+            .filter(func.date(Pedido.updated_at) <= fin)
+        )
+        if estado_filtro == "todos":
+            pedidos_query = pedidos_query.filter(
+                Pedido.estado.in_(["pagado", "cargado", "cancelado", "anulado"])
+            )
+        elif estado_filtro == "pagado":
+            pedidos_query = pedidos_query.filter(Pedido.estado.in_(["pagado", "cargado"]))
+        else:
+            pedidos_query = pedidos_query.filter(Pedido.estado == estado_filtro)
+        pedidos = pedidos_query.order_by(Pedido.updated_at.desc(), Pedido.id.desc()).all()
+
+        reservas: list[Reserva] = []
+        if estado_filtro in {"todos", "pagado"}:
+            reservas = _reservas_cerradas_en_rango(db, inicio, fin)
 
         filas: list[TransaccionResumen] = []
         for p in pedidos:
+            area_tx = _tipo_transaccion_pedido(p)
+            if area_tx == "restaurante":
+                area_tx = "cocina"
+            if area_tx == "habitacion":
+                area_tx = "habitaciones"
+            if area_tx not in {"habitaciones", "cocina", "bar", "piscina"}:
+                area_tx = "cocina"
+            if area_filtro != "todas" and area_filtro != area_tx:
+                continue
+
             fecha = p.updated_at or p.fecha or datetime_type.utcnow()
             filas.append(
                 TransaccionResumen(
@@ -797,11 +844,15 @@ def historial_transacciones(
                     concepto=_concepto_pedido(p),
                     monto_usd=Decimal(p.pagado_usd or 0),
                     monto_bs=Decimal(p.pagado_bs or 0),
-                    tipo=_tipo_transaccion_pedido(p),
+                    tipo=area_tx,
+                    area=area_tx,
+                    estado=(p.estado or "pagado"),
                     usuario_nombre="Sistema",
                 )
             )
         for r in reservas:
+            if area_filtro not in {"todas", "habitaciones"}:
+                continue
             fecha = r.updated_at or datetime_type.utcnow()
             filas.append(
                 TransaccionResumen(
@@ -810,7 +861,9 @@ def historial_transacciones(
                     concepto=f"Check-out Hab. (reserva #{r.id}) · {r.huesped}",
                     monto_usd=Decimal(r.total_final_usd or 0),
                     monto_bs=Decimal(r.total_final_bs or 0),
-                    tipo="checkout",
+                    tipo="habitaciones",
+                    area="habitaciones",
+                    estado="pagado",
                     usuario_nombre="Sistema",
                 )
             )

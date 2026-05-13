@@ -289,6 +289,9 @@ class Pedido(Base):
     anulado_motivo = Column(String(200), nullable=True)
     anulado_por = Column(String(100), nullable=True)
     anulado_en = Column(DateTime, nullable=True)
+    # Cancelación de pedido abierto (sin eliminar registro).
+    cancelado_por = Column(String(100), nullable=True)
+    cancelado_en = Column(DateTime, nullable=True)
     # Marca la última vez que se modificó la cuenta abierta (útil para la
     # vista de cuentas pendientes en POS).
     ultima_actividad = Column(DateTime, default=caracas_now, nullable=False)

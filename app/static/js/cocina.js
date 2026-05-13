@@ -53,7 +53,7 @@ document.getElementById("cocina-info").textContent = usuario
   ? `Sesión: ${usuario.nombre} · ${usuario.rol}`
   : "";
 
-const REFRESH_MS = 10_000;
+const REFRESH_MS = 30_000;
 const HORA_TICK_MS = 30_000;
 const INACTIVIDAD_MS = 30 * 60 * 1000;
 
@@ -273,10 +273,39 @@ function tickHora() {
   document.getElementById("cocina-hora").textContent = nowVE();
 }
 
+let intervaloRefresco = null;
+let intervaloHora = null;
+
+function iniciarAutoRefresh() {
+  if (intervaloRefresco) clearInterval(intervaloRefresco);
+  intervaloRefresco = setInterval(cargarPedidos, REFRESH_MS);
+}
+
+function detenerAutoRefresh() {
+  if (intervaloRefresco) {
+    clearInterval(intervaloRefresco);
+    intervaloRefresco = null;
+  }
+}
+
+function iniciarReloj() {
+  if (intervaloHora) clearInterval(intervaloHora);
+  intervaloHora = setInterval(tickHora, HORA_TICK_MS);
+}
+
 cargarPedidos();
 tickHora();
-setInterval(cargarPedidos, REFRESH_MS);
-setInterval(tickHora, HORA_TICK_MS);
+iniciarAutoRefresh();
+iniciarReloj();
+window.addEventListener("beforeunload", () => {
+  detenerAutoRefresh();
+});
+const btnRefresh = document.getElementById("btn-refresh");
+if (btnRefresh) {
+  btnRefresh.onclick = async () => {
+    await cargarPedidos();
+  };
+}
 
 // Auto-logout por inactividad.
 let inactividadTimer;

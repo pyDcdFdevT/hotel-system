@@ -40,6 +40,7 @@
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="inventario" data-roles="admin">Inventario</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="gastos" data-roles="admin">Gastos</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="historial" data-roles="admin">📊 Historial</button>
+        <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="supervision" data-roles="admin">📋 Supervisión</button>
         <button class="tab-btn text-sm px-4 py-2 text-white" data-tab="config" data-roles="admin">Tasas</button>
       </div>
     </nav>
@@ -118,6 +119,8 @@
               <tr>
                 <th>Fecha</th>
                 <th>Tipo</th>
+                <th>Área</th>
+                <th>Estado</th>
                 <th>Concepto</th>
                 <th class="text-right">USD</th>
                 <th class="text-right">Bs</th>
@@ -1218,6 +1221,25 @@
           <span class="ml-auto text-xs text-slate-500" id="hist-rango-label">--</span>
         </div>
       </div>
+      <div id="filtros-admin" class="card p-4 mb-4 hidden">
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="text-xs uppercase text-slate-500">Área</label>
+          <select id="hist-filtro-area" class="border rounded px-2 py-1 text-sm">
+            <option value="todas">Todas</option>
+            <option value="habitaciones">Habitaciones</option>
+            <option value="cocina">Cocina</option>
+            <option value="bar">Barra</option>
+            <option value="piscina">Piscina</option>
+          </select>
+          <label class="text-xs uppercase text-slate-500 ml-2">Estado</label>
+          <select id="hist-filtro-estado" class="border rounded px-2 py-1 text-sm">
+            <option value="todos">Todos</option>
+            <option value="pagado">Pagados</option>
+            <option value="cancelado">Cancelados</option>
+            <option value="anulado">Anulados</option>
+          </select>
+        </div>
+      </div>
 
       <div class="card p-4 mb-4">
         <h3 class="text-sm uppercase tracking-wider text-slate-500 mb-3">Resumen del período</h3>
@@ -1299,6 +1321,37 @@
         <div class="flex items-center justify-end gap-2 mt-2">
           <button id="hist-pag-anterior" class="text-xs px-2 py-1 border rounded">‹ Anterior</button>
           <button id="hist-pag-siguiente" class="text-xs px-2 py-1 border rounded">Siguiente ›</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Supervisión (solo admin) -->
+    <section id="tab-supervision" class="tab-panel">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <h2 class="text-xl font-semibold">📋 Supervisión de pedidos activos</h2>
+        <div class="flex items-center gap-2">
+          <button id="btn-supervision-refresh" class="px-3 py-1 rounded bg-blue-600 text-white text-sm">🔄 Actualizar</button>
+          <span class="text-xs text-slate-500" id="supervision-actualizado">--</span>
+        </div>
+      </div>
+      <div class="grid md:grid-cols-2 gap-4 mb-4">
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Cocina</p>
+          <p class="text-2xl font-semibold" id="supervision-count-cocina">0</p>
+        </div>
+        <div class="card p-4">
+          <p class="text-xs uppercase text-slate-500">Barra</p>
+          <p class="text-2xl font-semibold" id="supervision-count-bar">0</p>
+        </div>
+      </div>
+      <div class="supervision-grid">
+        <div>
+          <h3 class="supervision-col-title">🍳 Cocina</h3>
+          <div id="supervision-cocina" class="space-y-3"></div>
+        </div>
+        <div>
+          <h3 class="supervision-col-title">🍸 Barra</h3>
+          <div id="supervision-bar" class="space-y-3"></div>
         </div>
       </div>
     </section>
@@ -1404,6 +1457,10 @@
       historial: async () => {
         const mod = await import("/static/js/historial.js");
         await mod.initHistorial();
+      },
+      supervision: async () => {
+        const mod = await import("/static/js/supervision.js");
+        await mod.initSupervision();
       },
     };
     const loaded = new Set();

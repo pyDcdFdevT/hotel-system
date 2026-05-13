@@ -134,6 +134,16 @@ def _agregar_estado_pedido(detalles: list[DetallePedido]) -> str:
 AREAS_COCINA_VALIDAS = {"cocina", "bar"}
 
 
+def _resolver_area_detalle(detalle: DetallePedido) -> str:
+    area = (detalle.producto.area if detalle.producto else "") or ""
+    area = area.lower().strip()
+    if area == "cocina":
+        return "cocina"
+    if area == "bar":
+        return "bar"
+    return "bar"
+
+
 @router.get(
     "/activos-cocina",
     response_model=List[PedidoCocinaOut],
@@ -198,22 +208,11 @@ def listar_pedidos_cocina(
         # "para cocina" si producto.area == "cocina"; análogo para "bar".
         # El área "general" (por ejemplo bebidas sin clasificar) se asigna
         # al área "bar" para que no se pierda.
-        def _area_detalle(det):
-            a = (det.producto.area if det.producto else None) or ""
-            a = a.lower().strip()
-            if a == "cocina":
-                return "cocina"
-            if a == "bar":
-                return "bar"
-            # "general", "piscina", … por defecto van a bar (es lo más
-            # frecuente: bebidas listas para servir).
-            return "bar"
-
         if area_efectiva is None:
             detalles_visibles = list(p.detalles)
         else:
             detalles_visibles = [
-                d for d in p.detalles if _area_detalle(d) == area_efectiva
+                d for d in p.detalles if _resolver_area_detalle(d) == area_efectiva
             ]
 
         # Sólo nos interesan los detalles que aún no están entregados/listos.
@@ -255,6 +254,69 @@ def listar_pedidos_cocina(
                 ],
             )
         )
+    return salida
+
+
+@router.get("/supervision")
+def get_pedidos_supervision(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(require_roles("admin")),
+):
+    """
+    Devuelve pedidos abiertos con detalles activos (pendiente/en_preparacion),
+    agrupados por área para supervisión administrativa.
+    """
+    _ = usuario  # explicita consumo de dependencia
+    pedidos = (
+        db.query(Pedido)
+        .options(joinedload(Pedido.detalles).joinedload(DetallePedido.producto))
+        .filter(Pedido.estado == "abierto")
+        .order_by(Pedido.fecha.asc())
+        .all()
+    )
+
+    salida: dict[str, list[dict]] = {"cocina": [], "bar": []}
+    for pedido in pedidos:
+        detalles_cocina = []
+        detalles_bar = []
+        for d in pedido.detalles or []:
+            estado = (d.estado or "pendiente").lower()
+            if estado not in {"pendiente", "en_preparacion"}:
+                continue
+            row = {
+                "detalle_id": d.id,
+                "producto": d.producto.nombre if d.producto else f"#{d.producto_id}",
+                "cantidad": float(d.cantidad or 0),
+                "estado": estado,
+            }
+            area = _resolver_area_detalle(d)
+            if area == "cocina":
+                detalles_cocina.append(row)
+            else:
+                detalles_bar.append(row)
+
+        base = {
+            "id": pedido.id,
+            "mesa": pedido.mesa,
+            "habitacion_numero": pedido.habitacion_numero,
+            "creado_en": pedido.fecha.isoformat() if pedido.fecha else None,
+        }
+        if detalles_cocina:
+            salida["cocina"].append(
+                {
+                    **base,
+                    "detalles": detalles_cocina,
+                    "total_pendientes": len(detalles_cocina),
+                }
+            )
+        if detalles_bar:
+            salida["bar"].append(
+                {
+                    **base,
+                    "detalles": detalles_bar,
+                    "total_pendientes": len(detalles_bar),
+                }
+            )
     return salida
 
 
@@ -760,7 +822,12 @@ def cargar_a_habitacion(
         raise HTTPException(status_code=500, detail=f"Error cargando a habitación: {exc}") from exc
 
 
-def _cancelar_pedido_interno(db: Session, pedido_id: int) -> Pedido:
+def _cancelar_pedido_interno(
+    db: Session,
+    pedido_id: int,
+    cancelado_por: Optional[str] = None,
+    motivo: Optional[str] = None,
+) -> Pedido:
     """Marca el pedido como cancelado y devuelve el stock consumido.
 
     Sólo cancela pedidos en estado ``abierto``. Para cada detalle, devuelve
@@ -786,6 +853,12 @@ def _cancelar_pedido_interno(db: Session, pedido_id: int) -> Pedido:
             # Si la cantidad era 0 o el producto fue eliminado, seguimos.
             continue
     pedido.estado = "cancelado"
+    pedido.cancelado_en = caracas_now()
+    pedido.cancelado_por = cancelado_por
+    if motivo:
+        anteriores = (pedido.notas or "").strip()
+        marca = f"Cancelado: {motivo.strip()}"
+        pedido.notas = f"{anteriores} | {marca}".strip(" |") if anteriores else marca
     pedido.updated_at = utc_now()
     return pedido
 
@@ -794,12 +867,28 @@ def _cancelar_pedido_interno(db: Session, pedido_id: int) -> Pedido:
     "/{pedido_id}/cancelar",
     dependencies=[Depends(require_roles("admin", "mesero"))],
 )
-def cancelar_pedido(pedido_id: int, db: Session = Depends(get_db)):
+def cancelar_pedido(
+    pedido_id: int,
+    motivo: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
     """Cancela un pedido abierto y devuelve el stock descontado."""
     try:
-        pedido = _cancelar_pedido_interno(db, pedido_id)
+        pedido = _cancelar_pedido_interno(
+            db,
+            pedido_id,
+            cancelado_por=usuario.nombre,
+            motivo=motivo,
+        )
         db.commit()
-        return {"success": True, "pedido_id": pedido.id, "estado": pedido.estado}
+        return {
+            "success": True,
+            "pedido_id": pedido.id,
+            "estado": pedido.estado,
+            "cancelado_por": pedido.cancelado_por,
+            "cancelado_en": pedido.cancelado_en.isoformat() if pedido.cancelado_en else None,
+        }
     except HTTPException:
         db.rollback()
         raise
@@ -809,10 +898,20 @@ def cancelar_pedido(pedido_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
-def cancelar(pedido_id: int, db: Session = Depends(get_db)):
+def cancelar(
+    pedido_id: int,
+    motivo: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
     """Alias legacy: equivalente a /cancelar pero accesible para cualquier usuario autenticado."""
     try:
-        _cancelar_pedido_interno(db, pedido_id)
+        _cancelar_pedido_interno(
+            db,
+            pedido_id,
+            cancelado_por=usuario.nombre,
+            motivo=motivo,
+        )
         db.commit()
     except HTTPException:
         db.rollback()

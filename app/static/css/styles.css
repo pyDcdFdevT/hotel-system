@@ -640,3 +640,94 @@ th {
   color: var(--color-primary);
   border: 1px solid var(--color-primary);
 }
+
+/* ----------------------------- Supervisión ----------------------------- */
+.supervision-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 900px) {
+  .supervision-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.supervision-col-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.supervision-card {
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: 0.75rem;
+  background: #fff;
+  padding: 0.8rem;
+}
+
+.supervision-card-cocina {
+  border-left-color: #16a34a;
+}
+
+.supervision-card-bar {
+  border-left-color: #2563eb;
+}
+
+.supervision-card-head,
+.supervision-card-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.supervision-card-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.supervision-items {
+  margin-top: 0.6rem;
+  margin-bottom: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.supervision-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+}
+
+.supervision-badge {
+  border-radius: 9999px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.supervision-badge-pend {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.supervision-badge-prep {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.btn-supervision-cancel {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #9f1239;
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+}
