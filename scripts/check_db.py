@@ -263,25 +263,19 @@ def _migrar_detalles_pedido_estado(engine) -> None:
     Permite rastrear el flujo cocina/bar a nivel de detalle:
     ``pendiente → en_preparacion → listo → entregado``.
     """
-    if not _is_sqlite(engine):
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if not inspector.has_table("detalles_pedido"):
         return
-    from sqlalchemy import text
 
     with engine.begin() as conn:
-        existe = conn.execute(
-            text(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='detalles_pedido'"
-            )
-        ).first()
-        if not existe:
-            return
-        info = conn.execute(text("PRAGMA table_info(detalles_pedido)")).fetchall()
-        columnas = {row[1] for row in info}
+        columnas = {col["name"] for col in inspect(conn).get_columns("detalles_pedido")}
         nuevos = (
             ("estado", "VARCHAR(20) NOT NULL DEFAULT 'pendiente'"),
-            ("iniciado_en", "DATETIME"),
-            ("listo_en", "DATETIME"),
-            ("entregado_en", "DATETIME"),
+            ("iniciado_en", "TIMESTAMP"),
+            ("listo_en", "TIMESTAMP"),
+            ("entregado_en", "TIMESTAMP"),
         )
         for nombre, tipo in nuevos:
             if nombre not in columnas:
@@ -380,62 +374,22 @@ def _migrar_favoritos_usuario(engine) -> None:
     En la práctica ``create_all`` lo hará también, pero ejecutarlo
     explícitamente aquí facilita ver el progreso en logs (Railway).
     """
-    if not _is_sqlite(engine):
-        return
-    from sqlalchemy import text
+    from app.models import FavoritoUsuario
 
-    with engine.begin() as conn:
-        existe = conn.execute(
-            text(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='favoritos_usuario'"
-            )
-        ).first()
-        if existe:
-            return
-        print("[check_db] Creando tabla favoritos_usuario…")
-        conn.execute(
-            text(
-                """
-                CREATE TABLE favoritos_usuario (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
-                    producto_id INTEGER NOT NULL REFERENCES productos(id),
-                    orden INTEGER NOT NULL DEFAULT 0,
-                    created_at DATETIME NOT NULL,
-                    CONSTRAINT uq_favorito_usuario_producto
-                        UNIQUE (usuario_id, producto_id)
-                )
-                """
-            )
-        )
-        conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_favoritos_usuario_usuario_id "
-                "ON favoritos_usuario (usuario_id)"
-            )
-        )
-        conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_favoritos_usuario_producto_id "
-                "ON favoritos_usuario (producto_id)"
-            )
-        )
+    print("[check_db] Verificando tabla favoritos_usuario…")
+    FavoritoUsuario.__table__.create(bind=engine, checkfirst=True)
 
 
 def _migrar_pedidos_habitacion(engine) -> None:
     """Añade columnas a ``pedidos`` (habitación, cocina, anulación, actividad)."""
-    if not _is_sqlite(engine):
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if not inspector.has_table("pedidos"):
         return
-    from sqlalchemy import text
 
     with engine.begin() as conn:
-        existe = conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name='pedidos'")
-        ).first()
-        if not existe:
-            return
-        info = conn.execute(text("PRAGMA table_info(pedidos)")).fetchall()
-        columnas = {row[1] for row in info}
+        columnas = {col["name"] for col in inspect(conn).get_columns("pedidos")}
         # Columnas para anulación de ventas pagadas y "última actividad".
         anulacion = (
             ("anulado", "BOOLEAN NOT NULL DEFAULT 0"),
@@ -443,8 +397,8 @@ def _migrar_pedidos_habitacion(engine) -> None:
             ("anulado_por", "VARCHAR(100)"),
             ("anulado_en", "DATETIME"),
             ("cancelado_por", "VARCHAR(100)"),
-            ("cancelado_en", "DATETIME"),
-            ("ultima_actividad", "DATETIME"),
+            ("cancelado_en", "TIMESTAMP"),
+            ("ultima_actividad", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
         )
         for nombre, tipo in anulacion:
             if nombre not in columnas:
@@ -505,18 +459,14 @@ def _migrar_pedidos_habitacion(engine) -> None:
 
 def _migrar_reservas_vehiculo(engine) -> None:
     """Añade columnas del vehículo y de horas/recargos a ``reservas``."""
-    if not _is_sqlite(engine):
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if not inspector.has_table("reservas"):
         return
-    from sqlalchemy import text
 
     with engine.begin() as conn:
-        existe = conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name='reservas'")
-        ).first()
-        if not existe:
-            return
-        info = conn.execute(text("PRAGMA table_info(reservas)")).fetchall()
-        columnas = {row[1] for row in info}
+        columnas = {col["name"] for col in inspect(conn).get_columns("reservas")}
         nuevos = (
             ("vehiculo_modelo", "VARCHAR(100)"),
             ("vehiculo_color", "VARCHAR(50)"),
@@ -535,7 +485,7 @@ def _migrar_reservas_vehiculo(engine) -> None:
             ("numero_documento", "VARCHAR(50)"),
             ("cancelada", "BOOLEAN NOT NULL DEFAULT 0"),
             ("cancelada_motivo", "VARCHAR(200)"),
-            ("cancelada_en", "DATETIME"),
+            ("cancelada_en", "TIMESTAMP"),
             ("reembolso_porcentaje", "INTEGER NOT NULL DEFAULT 0"),
             ("reembolso_monto_usd", "NUMERIC(10, 2) NOT NULL DEFAULT 0"),
             ("reembolso_monto_bs", "NUMERIC(12, 2) NOT NULL DEFAULT 0"),
