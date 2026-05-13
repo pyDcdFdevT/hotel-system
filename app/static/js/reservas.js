@@ -7,6 +7,7 @@ import {
   formatDateOnly,
   todayIso,
 } from "./api.js";
+import { abrirCheckin } from "./habitaciones.js";
 
 const els = {
   tabla: document.getElementById("reservas-tabla"),
@@ -299,15 +300,8 @@ async function checkInDesdeReserva(reservaId, habitacionId) {
       showToast("La habitación de la reserva no existe", "error");
       return;
     }
-    // Abrimos el modal de check-in pre-cargado.
-    const { abrirCheckin } = await import("./habitaciones.js");
-    if (typeof abrirCheckin !== "function") {
-      showToast("Función de check-in no disponible", "error");
-      return;
-    }
-    await abrirCheckin(habitacionId, { reserva, habitaciones: habs });
-    // Cuando se confirme, habitaciones.js refresca la tabla; nos suscribimos
-    // para refrescar también la lista de reservas.
+    // Modal en index.html (habitaciones.js): mismo flujo sin cambiar de pestaña.
+    abrirCheckin(habitacionId, { reserva, habitaciones: habs });
     document.addEventListener("checkin:confirmado", refrescarTrasCheckin, {
       once: true,
     });
