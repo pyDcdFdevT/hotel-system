@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
@@ -33,6 +32,18 @@ def _normalize_database_url(url: str) -> str:
 
 DATABASE_URL = _normalize_database_url(RAW_DATABASE_URL)
 
+
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    """Habilita foreign keys en SQLite.
+
+    IMPORTANTE: esta función se registra sólo para engine SQLite.
+    Nunca se registra en PostgreSQL.
+    """
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 if DATABASE_URL and DATABASE_URL.startswith("postgresql"):
     engine = create_engine(
         DATABASE_URL,
@@ -49,6 +60,8 @@ else:
         connect_args={"check_same_thread": False},
         future=True,
     )
+    # Registrar PRAGMA exclusivamente en SQLite.
+    event.listen(engine, "connect", _enable_sqlite_foreign_keys)
     print(f"[DB] Conectando a SQLite: {sqlite_path_display}")
 
 
@@ -59,17 +72,6 @@ SessionLocal = sessionmaker(
     class_=Session,
     expire_on_commit=False,
 )
-
-
-@event.listens_for(Engine, "connect")
-def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
-    # PRAGMA aplica sólo en SQLite; en PostgreSQL se ignora.
-    try:
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-    except Exception:
-        return
 
 
 class Base(DeclarativeBase):
