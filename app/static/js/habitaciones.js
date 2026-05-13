@@ -277,9 +277,11 @@ function botonesPorEstado(h) {
       const rr = reservasReservadasPorHab[h.id];
       const nombre = (rr?.huesped || "").trim() || "Huésped";
       const idReserva = rr?.id;
-      const aviso = `<p class="text-xs text-amber-900 leading-snug mb-2">🔒 Reservado para <strong>${escapeHtml(nombre)}</strong> · Ir a <strong>Reservas</strong> para hacer check-in</p>`;
+      const aviso = `<p class="text-xs text-amber-900 leading-snug mb-2">🔒 Reservado para <strong>${escapeHtml(nombre)}</strong></p>`;
       if (idReserva) {
-        return `${aviso}<button type="button" class="btn-cancelar btn-cancelar-reserva-tarjeta" data-reserva-id="${idReserva}" data-huesped="${escapeHtml(nombre)}" data-habitacion-numero="${escapeHtml(String(h.numero))}">Cancelar reserva</button>`;
+        return `${aviso}
+        <button type="button" data-id="${h.id}" data-reserva-id="${idReserva}" class="btn-checkin btn-accion-checkin-reserva">Check-in</button>
+        <button type="button" class="btn-cancelar btn-cancelar-reserva-tarjeta" data-reserva-id="${idReserva}" data-huesped="${escapeHtml(nombre)}" data-habitacion-numero="${escapeHtml(String(h.numero))}">Cancelar reserva</button>`;
       }
       return `${aviso}<button type="button" class="btn-cancelar btn-liberar-reservada-sin-registro" data-id="${h.id}" data-numero="${escapeHtml(String(h.numero))}">Liberar habitación</button>
         <p class="text-[11px] text-slate-500 mt-1">Sin reserva formal en el sistema (ej. marcada manualmente). Esto solo cambia el estado a disponible.</p>`;
@@ -308,6 +310,14 @@ function enlazarBotones() {
   );
   els.grid.querySelectorAll(".btn-accion-checkin").forEach((btn) =>
     btn.addEventListener("click", () => abrirCheckin(Number(btn.dataset.id))),
+  );
+  els.grid.querySelectorAll(".btn-accion-checkin-reserva").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      checkInDesdeHabitacionReservada(
+        Number(btn.dataset.reservaId),
+        Number(btn.dataset.id),
+      ),
+    ),
   );
   els.grid.querySelectorAll(".btn-accion-checkout").forEach((btn) =>
     btn.addEventListener("click", () => abrirCheckout(Number(btn.dataset.id))),
@@ -339,6 +349,10 @@ function enlazarBotones() {
       ),
     ),
   );
+}
+
+async function checkInDesdeHabitacionReservada(reservaId, habitacionId) {
+  await abrirCheckinConReserva(reservaId, habitacionId);
 }
 
 async function cambiarEstado(id, estado) {
@@ -506,6 +520,25 @@ export function abrirCheckin(habId, opts = {}) {
   // Cargamos las tasas actuales en paralelo para autocompletar Bs cuando aplique.
   cargarTasasCheckin().then(autocompletarMontoPagoAnticipado);
   recalcCheckin();
+}
+
+/**
+ * Obtiene la reserva y habitaciones, y abre el modal de check-in precargado.
+ * Usado desde la pestaña Reservas y desde la tarjeta de habitación ``reservada``.
+ */
+export async function abrirCheckinConReserva(reservaId, habitacionId) {
+  try {
+    const reserva = await get(`/reservas/${reservaId}`);
+    const habs = await get("/habitaciones/");
+    const hab = habs.find((h) => h.id === habitacionId);
+    if (!hab) {
+      showToast("La habitación de la reserva no existe", "error");
+      return;
+    }
+    abrirCheckin(habitacionId, { reserva, habitaciones: habs });
+  } catch (error) {
+    showToast(`Error preparando check-in: ${error.message}`, "error");
+  }
 }
 
 function diferenciaNoches(fechaIn, fechaOut) {

@@ -535,8 +535,8 @@
         <form id="form-reserva" class="card p-5 space-y-3">
           <h2 class="text-lg font-semibold">Nueva reserva</h2>
           <p class="text-xs text-slate-500">
-            Crea una reserva por adelantado. La habitación quedará bloqueada
-            hasta que se haga el check-in.
+            Registra los datos básicos; la habitación quedará bloqueada hasta el check-in.
+            Vehículo y pago anticipado se indican al hacer check-in.
           </p>
           <div>
             <label class="text-xs uppercase text-slate-500">Habitación</label>
@@ -606,67 +606,6 @@
               · <span id="reserva-total-bs" class="text-slate-700">Bs 0.00</span>
             </p>
           </div>
-
-          <details class="border rounded p-2">
-            <summary class="cursor-pointer text-sm font-medium text-slate-700">
-              🚗 Vehículo (opcional)
-            </summary>
-            <div class="grid grid-cols-3 gap-2 mt-2">
-              <div>
-                <label class="text-xs uppercase text-slate-500">Modelo</label>
-                <input name="vehiculo_modelo" class="w-full border rounded px-2 py-1" placeholder="Toyota Corolla" />
-              </div>
-              <div>
-                <label class="text-xs uppercase text-slate-500">Color</label>
-                <input name="vehiculo_color" class="w-full border rounded px-2 py-1" placeholder="Blanco" />
-              </div>
-              <div>
-                <label class="text-xs uppercase text-slate-500">Placa</label>
-                <input name="vehiculo_placa" class="w-full border rounded px-2 py-1" placeholder="AB123CD" />
-              </div>
-            </div>
-          </details>
-
-          <fieldset class="border rounded p-3 space-y-2">
-            <legend class="text-sm font-medium text-slate-700 px-1">💰 Pago anticipado (opcional)</legend>
-            <div class="flex gap-3 text-sm">
-              <label class="flex items-center gap-1">
-                <input type="radio" name="pago_anticipado" value="0" checked /> Pagar al check-out
-              </label>
-              <label class="flex items-center gap-1">
-                <input type="radio" name="pago_anticipado" value="1" /> Pagar ahora
-              </label>
-            </div>
-            <div id="reserva-pago-detalle" class="hidden space-y-2">
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="text-xs uppercase text-slate-500">Moneda</label>
-                  <select id="reserva-pago-moneda" name="moneda_pago" class="w-full border rounded px-2 py-1">
-                    <option value="usd">USD</option>
-                    <option value="bs">Bolívares</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="text-xs uppercase text-slate-500">Método</label>
-                  <select id="reserva-pago-metodo" name="metodo_pago" class="w-full border rounded px-2 py-1">
-                    <option value="efectivo">💵 Efectivo</option>
-                    <option value="transferencia">💳 Transferencia</option>
-                    <option value="pagomovil">📱 Pago Móvil</option>
-                  </select>
-                </div>
-              </div>
-              <div class="grid grid-cols-2 gap-2">
-                <div id="reserva-pago-usd-row">
-                  <label class="text-xs uppercase text-slate-500">Monto USD</label>
-                  <input id="reserva-pago-usd" type="number" step="0.01" name="monto_recibido_usd" value="0" class="w-full border rounded px-2 py-1" />
-                </div>
-                <div id="reserva-pago-bs-row" class="hidden">
-                  <label class="text-xs uppercase text-slate-500">Monto Bs</label>
-                  <input id="reserva-pago-bs" type="number" step="0.01" name="monto_recibido_bs" value="0" class="w-full border rounded px-2 py-1" />
-                </div>
-              </div>
-            </div>
-          </fieldset>
 
           <button type="submit" class="w-full px-3 py-2 rounded bg-emerald-600 text-white">
             Registrar reserva

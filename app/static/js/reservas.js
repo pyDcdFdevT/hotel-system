@@ -7,7 +7,7 @@ import {
   formatDateOnly,
   todayIso,
 } from "./api.js";
-import { abrirCheckin } from "./habitaciones.js";
+import { abrirCheckinConReserva } from "./habitaciones.js";
 
 const els = {
   tabla: document.getElementById("reservas-tabla"),
@@ -23,24 +23,24 @@ const els = {
   resumenPrecioUnit: document.getElementById("reserva-precio-unit"),
   resumenTotalUsd: document.getElementById("reserva-total-usd"),
   resumenTotalBs: document.getElementById("reserva-total-bs"),
-
-  pagoDetalle: document.getElementById("reserva-pago-detalle"),
-  pagoMoneda: document.getElementById("reserva-pago-moneda"),
-  pagoUsdRow: document.getElementById("reserva-pago-usd-row"),
-  pagoBsRow: document.getElementById("reserva-pago-bs-row"),
-  pagoUsd: document.getElementById("reserva-pago-usd"),
-  pagoBs: document.getElementById("reserva-pago-bs"),
 };
 
 let habitaciones = [];
 let tasaBcv = 405.35;
 let reservaCanceladaListenerRegistrado = false;
+let checkinConfirmadoListenerRegistrado = false;
 
 export async function initReservas() {
   if (!reservaCanceladaListenerRegistrado) {
     reservaCanceladaListenerRegistrado = true;
     document.addEventListener("reserva:cancelada", () => {
       void loadReservas();
+    });
+  }
+  if (!checkinConfirmadoListenerRegistrado) {
+    checkinConfirmadoListenerRegistrado = true;
+    document.addEventListener("checkin:confirmado", () => {
+      void refrescarTrasCheckin();
     });
   }
   if (els.form) {
@@ -59,7 +59,6 @@ export async function initReservas() {
   }
   await Promise.all([cargarHabitacionesDisponibles(), cargarTasa(), loadReservas()]);
   recalcularResumen();
-  actualizarVisibilidadPago();
 }
 
 async function cargarTasa() {
@@ -173,26 +172,8 @@ function habitacionNumero(id) {
   return hab ? `#${hab.numero}` : `#${id}`;
 }
 
-function manejarCambioForm(event) {
-  if (
-    event?.target?.name === "pago_anticipado" ||
-    event?.target?.id === "reserva-pago-moneda"
-  ) {
-    actualizarVisibilidadPago();
-    return;
-  }
+function manejarCambioForm() {
   recalcularResumen();
-}
-
-function actualizarVisibilidadPago() {
-  const activo =
-    els.form?.querySelector('input[name="pago_anticipado"]:checked')?.value === "1";
-  if (els.pagoDetalle) els.pagoDetalle.classList.toggle("hidden", !activo);
-  const moneda = els.pagoMoneda?.value || "usd";
-  if (els.pagoUsdRow)
-    els.pagoUsdRow.classList.toggle("hidden", moneda !== "usd");
-  if (els.pagoBsRow)
-    els.pagoBsRow.classList.toggle("hidden", moneda !== "bs");
 }
 
 function calcularNoches() {
@@ -228,8 +209,6 @@ async function crearReserva(event) {
   const habSelect = els.habitacionSelect;
   const opt = habSelect?.options[habSelect.selectedIndex];
   const precioUsd = opt && opt.dataset.usd ? Number(opt.dataset.usd) : 0;
-  const pagoAnticipado =
-    els.form?.querySelector('input[name="pago_anticipado"]:checked')?.value === "1";
 
   const payload = {
     habitacion_id: Number(fd.get("habitacion_id")),
@@ -245,18 +224,7 @@ async function crearReserva(event) {
     pais_origen: fd.get("pais_origen")?.toString().trim() || null,
     tipo_documento: fd.get("tipo_documento")?.toString() || null,
     numero_documento: fd.get("numero_documento")?.toString().trim() || null,
-    vehiculo_modelo: fd.get("vehiculo_modelo")?.toString().trim() || null,
-    vehiculo_color: fd.get("vehiculo_color")?.toString().trim() || null,
-    vehiculo_placa: fd.get("vehiculo_placa")?.toString().trim() || null,
-    pago_anticipado: pagoAnticipado,
   };
-  if (pagoAnticipado) {
-    payload.moneda_pago = fd.get("moneda_pago") || "usd";
-    payload.metodo_pago = fd.get("metodo_pago") || "efectivo";
-    payload.monto_recibido_usd = Number(fd.get("monto_recibido_usd") || 0);
-    payload.monto_recibido_bs = Number(fd.get("monto_recibido_bs") || 0);
-    payload.tasa_tipo = "bcv";
-  }
   if (
     !payload.habitacion_id ||
     !payload.huesped ||
@@ -267,13 +235,7 @@ async function crearReserva(event) {
   }
   try {
     const reserva = await post("/reservas/", payload);
-    let msg = `Reserva #${reserva.id} creada para ${reserva.huesped}`;
-    if (reserva.estado_pago === "pagado") {
-      msg += " · 💰 estadía pagada por adelantado";
-    } else if (reserva.estado_pago === "parcial") {
-      msg += " · pago parcial registrado";
-    }
-    showToast(msg, "success");
+    showToast(`Reserva #${reserva.id} creada para ${reserva.huesped}`, "success");
     els.form.reset();
     if (els.fechaIn) els.fechaIn.value = todayIso();
     if (els.fechaOut) {
@@ -283,9 +245,9 @@ async function crearReserva(event) {
     }
     if (els.horaIn) els.horaIn.value = "15:00";
     if (els.horaOut) els.horaOut.value = "13:00";
-    actualizarVisibilidadPago();
     recalcularResumen();
-    await Promise.all([cargarHabitacionesDisponibles(), loadReservas()]);
+    await cargarHabitacionesDisponibles();
+    await loadReservas();
   } catch (error) {
     showToast(`Error creando reserva: ${error.message}`, "error");
   }
@@ -293,18 +255,7 @@ async function crearReserva(event) {
 
 async function checkInDesdeReserva(reservaId, habitacionId) {
   try {
-    const reserva = await get(`/reservas/${reservaId}`);
-    const habs = await get("/habitaciones/");
-    const hab = habs.find((h) => h.id === habitacionId);
-    if (!hab) {
-      showToast("La habitación de la reserva no existe", "error");
-      return;
-    }
-    // Modal en index.html (habitaciones.js): mismo flujo sin cambiar de pestaña.
-    abrirCheckin(habitacionId, { reserva, habitaciones: habs });
-    document.addEventListener("checkin:confirmado", refrescarTrasCheckin, {
-      once: true,
-    });
+    await abrirCheckinConReserva(reservaId, habitacionId);
   } catch (error) {
     showToast(`Error preparando check-in: ${error.message}`, "error");
   }
