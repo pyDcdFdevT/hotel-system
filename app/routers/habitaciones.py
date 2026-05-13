@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
@@ -43,6 +43,52 @@ router = APIRouter(prefix="/habitaciones", tags=["habitaciones"])
 ESTADOS_VALIDOS = set(ESTADOS_HABITACION)
 
 
+def _reserva_reservada_bloquea_hoy(reserva: Reserva, hoy: date) -> bool:
+    """Una reserva ``reservada`` bloquea la habitaci?n desde el d?a anterior al check-in."""
+    if reserva.estado != "reservada":
+        return False
+    if not reserva.fecha_checkin:
+        return False
+    return reserva.fecha_checkin <= hoy + timedelta(days=1)
+
+
+def _estado_efectivo_habitacion(
+    habitacion: Habitacion,
+    reservas_reservadas: List[Reserva],
+    hoy: date,
+) -> str:
+    """Estado mostrado en API: ``reservada`` solo si aplica ventana de bloqueo."""
+    bloqueo = any(_reserva_reservada_bloquea_hoy(r, hoy) for r in reservas_reservadas)
+    if habitacion.estado == "ocupada":
+        return "ocupada"
+    if habitacion.estado == "limpieza":
+        return "limpieza"
+    if habitacion.estado == "inhabilitada":
+        return "inhabilitada"
+    if habitacion.estado == "reservada":
+        return "reservada" if bloqueo else "disponible"
+    if habitacion.estado == "disponible" and bloqueo:
+        return "reservada"
+    return "disponible"
+
+
+def _habitaciones_con_estado_efectivo(
+    db: Session, habitaciones: List[Habitacion], hoy: date
+) -> List[HabitacionOut]:
+    reservas_rr = (
+        db.query(Reserva).filter(Reserva.estado == "reservada").all()
+    )
+    por_hab: dict[int, List[Reserva]] = {}
+    for r in reservas_rr:
+        por_hab.setdefault(r.habitacion_id, []).append(r)
+    out: List[HabitacionOut] = []
+    for h in habitaciones:
+        eff = _estado_efectivo_habitacion(h, por_hab.get(h.id, []), hoy)
+        row = HabitacionOut.model_validate(h, from_attributes=True)
+        out.append(row.model_copy(update={"estado": eff}))
+    return out
+
+
 def _cargar_habitacion(db: Session, habitacion_id: int) -> Habitacion:
     habitacion = db.query(Habitacion).filter(Habitacion.id == habitacion_id).first()
     if not habitacion:
@@ -69,14 +115,28 @@ def listar(
         query = db.query(Habitacion)
         if estado:
             query = query.filter(Habitacion.estado == estado)
-        return query.order_by(Habitacion.numero.asc()).all()
+        habitaciones = query.order_by(Habitacion.numero.asc()).all()
+        hoy = today()
+        efectivos = _habitaciones_con_estado_efectivo(db, habitaciones, hoy)
+        if estado:
+            efectivos = [h for h in efectivos if h.estado == estado]
+        return efectivos
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error listando habitaciones: {exc}") from exc
 
 
 @router.get("/{habitacion_id}", response_model=HabitacionOut)
 def obtener(habitacion_id: int, db: Session = Depends(get_db)):
-    return _cargar_habitacion(db, habitacion_id)
+    habitacion = _cargar_habitacion(db, habitacion_id)
+    hoy = today()
+    rs = (
+        db.query(Reserva)
+        .filter(Reserva.habitacion_id == habitacion.id, Reserva.estado == "reservada")
+        .all()
+    )
+    eff = _estado_efectivo_habitacion(habitacion, rs, hoy)
+    row = HabitacionOut.model_validate(habitacion, from_attributes=True)
+    return row.model_copy(update={"estado": eff})
 
 
 @router.post("/", response_model=HabitacionOut, status_code=status.HTTP_201_CREATED)
@@ -156,6 +216,25 @@ def checkin(habitacion_id: int, data: HabitacionCheckinRequest, db: Session = De
         )
     if habitacion.estado == "ocupada":
         raise HTTPException(status_code=400, detail="La habitaci?n ya est? ocupada")
+
+    hoy = today()
+    if not data.reserva_id:
+        pendientes = (
+            db.query(Reserva)
+            .filter(
+                Reserva.habitacion_id == habitacion.id,
+                Reserva.estado == "reservada",
+            )
+            .all()
+        )
+        if any(_reserva_reservada_bloquea_hoy(r, hoy) for r in pendientes):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "La habitacion tiene una reserva en periodo de bloqueo. "
+                    "Haga check-in con reserva_id o cancele la reserva."
+                ),
+            )
 
     activa = _reserva_activa(db, habitacion_id)
     if activa:

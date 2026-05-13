@@ -1144,9 +1144,10 @@ def test_reserva_con_documento(client):
     assert body["hora_ingreso"] == "15:30"
     assert body["vehiculo_modelo"] == "Toyota Corolla"
 
-    # La habitación queda en estado 'reservada' (no ocupada).
+    # Con fecha de ingreso lejana, la habitación sigue disponible en la API
+    # (bloqueo solo desde el día anterior al check-in).
     refrescada = client.get(f"/api/habitaciones/{hab['id']}").json()
-    assert refrescada["estado"] == "reservada"
+    assert refrescada["estado"] == "disponible"
 
     # GET /reservas/{id} expone los mismos campos.
     detalle = client.get(f"/api/reservas/{body['id']}").json()

@@ -7,8 +7,6 @@ import {
   formatDateOnly,
   todayIso,
 } from "./api.js";
-import { abrirCheckinConReserva } from "./habitaciones.js";
-
 const els = {
   tabla: document.getElementById("reservas-tabla"),
   form: document.getElementById("form-reserva"),
@@ -113,11 +111,6 @@ export async function loadReservas() {
           : r.documento || "-";
         const habNumero = habitacionNumero(r.habitacion_id);
         const acciones = [];
-        if (r.estado === "reservada") {
-          acciones.push(
-            `<button data-id="${r.id}" data-hab="${r.habitacion_id}" class="btn-checkin-resv px-3 py-1 rounded bg-blue-600 text-white text-xs">Check-in</button>`,
-          );
-        }
         if (r.estado === "activa") {
           acciones.push(
             `<span class="text-xs text-slate-500">Check-out desde Habitaciones</span>`,
@@ -145,13 +138,6 @@ export async function loadReservas() {
           </tr>`;
       })
       .join("");
-    els.tabla
-      .querySelectorAll(".btn-checkin-resv")
-      .forEach((btn) =>
-        btn.addEventListener("click", () =>
-          checkInDesdeReserva(Number(btn.dataset.id), Number(btn.dataset.hab)),
-        ),
-      );
     els.tabla.querySelectorAll(".btn-cancelar-reserva").forEach((btn) =>
       btn.addEventListener("click", () =>
         abrirCancelarReserva({
@@ -250,14 +236,6 @@ async function crearReserva(event) {
     await loadReservas();
   } catch (error) {
     showToast(`Error creando reserva: ${error.message}`, "error");
-  }
-}
-
-async function checkInDesdeReserva(reservaId, habitacionId) {
-  try {
-    await abrirCheckinConReserva(reservaId, habitacionId);
-  } catch (error) {
-    showToast(`Error preparando check-in: ${error.message}`, "error");
   }
 }
 

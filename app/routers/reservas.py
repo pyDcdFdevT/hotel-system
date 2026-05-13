@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import List, Optional
 
@@ -32,6 +33,22 @@ router = APIRouter(prefix="/reservas", tags=["reservas"])
 
 
 MONEDAS_PAGO_VALIDAS = {"usd", "bs"}
+
+
+def _inicio_fin_bloqueo_reserva(r: Reserva) -> tuple[date, date]:
+    """Rango inclusive en el que la reserva impide otras reservas solapadas."""
+    fin = r.fecha_checkout_estimado
+    if r.estado == "activa":
+        ini = r.fecha_checkin
+    else:
+        ini = r.fecha_checkin - timedelta(days=1)
+    return ini, fin
+
+
+def _rangos_bloqueo_se_solapan(
+    a_ini: date, a_fin: date, b_ini: date, b_fin: date
+) -> bool:
+    return a_ini <= b_fin and b_ini <= a_fin
 
 
 def _calcular_totales_finales(reserva: Reserva) -> None:
@@ -141,18 +158,30 @@ def crear_reserva(data: ReservaCreate, db: Session = Depends(get_db)):
             detail="La habitación está inhabilitada y no acepta reservas",
         )
 
-    # Conflicto con otra reserva activa/reservada de la misma habitación.
-    otra = (
+    hoy = today()
+    fecha_in = data.fecha_checkin or hoy
+    fecha_out = data.fecha_checkout_estimado
+
+    otras = (
         db.query(Reserva)
-        .filter(Reserva.habitacion_id == habitacion.id)
-        .filter(Reserva.estado.in_(["reservada", "activa"]))
-        .first()
-    )
-    if otra:
-        raise HTTPException(
-            status_code=400,
-            detail=f"La habitación ya tiene la reserva #{otra.id} en estado '{otra.estado}'",
+        .filter(
+            Reserva.habitacion_id == habitacion.id,
+            Reserva.estado.in_(["reservada", "activa"]),
         )
+        .all()
+    )
+    n_ini = fecha_in - timedelta(days=1)
+    n_fin = fecha_out
+    for r in otras:
+        o_ini, o_fin = _inicio_fin_bloqueo_reserva(r)
+        if _rangos_bloqueo_se_solapan(o_ini, o_fin, n_ini, n_fin):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"La habitación tiene conflicto con la reserva #{r.id} "
+                    "(fechas solapadas en periodo de bloqueo)."
+                ),
+            )
 
     try:
         noches = max(1, int(data.noches or 1))
@@ -196,8 +225,8 @@ def crear_reserva(data: ReservaCreate, db: Session = Depends(get_db)):
             estado_pago=estado_pago,
             metodo_pago=metodo_pago_resv,
         )
-        # La habitación queda "reservada" (bloqueada pero no ocupada).
-        if habitacion.estado == "disponible":
+        # La habitación pasa a "reservada" en BD solo al entrar en ventana de bloqueo.
+        if habitacion.estado == "disponible" and fecha_in <= hoy + timedelta(days=1):
             habitacion.estado = "reservada"
         db.add(reserva)
         db.commit()
