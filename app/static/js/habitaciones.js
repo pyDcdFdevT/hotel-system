@@ -95,6 +95,8 @@ const OPCIONES_PAGO = {
 let habitaciones = [];
 // Mapa habitacion_id -> reserva activa (para mostrar info del huésped en la tarjeta).
 let reservasActivasPorHab = {};
+/** Reservas en estado ``reservada`` (pre check-in), por ``habitacion_id``. */
+let reservasReservadasPorHab = {};
 let pedidosPreviewMeta = {};
 /** Última respuesta de ``checkout-preview`` (confirmar sin método si saldo = 0). */
 let ultimoPreviewCheckout = null;
@@ -170,15 +172,20 @@ export async function loadHabitaciones() {
   try {
     const estado = els.filtro ? els.filtro.value : "";
     const query = estado ? `?estado=${encodeURIComponent(estado)}` : "";
-    // En paralelo: habitaciones + reservas activas (para mostrar huésped en tarjeta).
-    const [habs, reservas] = await Promise.all([
+    // Habitaciones + reservas activas (ocupadas) + reservadas (pre check-in).
+    const [habs, reservasActivas, reservasReservadas] = await Promise.all([
       get(`/habitaciones/${query}`),
       get("/reservas/activas").catch(() => []),
+      get("/reservas/?estado=reservada").catch(() => []),
     ]);
     habitaciones = habs;
     reservasActivasPorHab = {};
-    for (const r of reservas || []) {
+    for (const r of reservasActivas || []) {
       if (r && r.habitacion_id) reservasActivasPorHab[r.habitacion_id] = r;
+    }
+    reservasReservadasPorHab = {};
+    for (const r of reservasReservadas || []) {
+      if (r && r.habitacion_id) reservasReservadasPorHab[r.habitacion_id] = r;
     }
     if (!habitaciones.length) {
       els.grid.innerHTML = `<div class="empty-state">No hay habitaciones registradas.</div>`;
@@ -266,11 +273,17 @@ function botonesPorEstado(h) {
         <button data-id="${h.id}" class="btn-editar-huesped btn-accion-editar">✏️ Editar huésped</button>
         <button data-id="${h.id}" class="btn-cancelar-checkin btn-accion-cancelar-checkin">🚫 Cancelar check-in</button>
       `;
-    case "reservada":
-      return `
-        <button data-id="${h.id}" class="btn-checkin-resv btn-accion-checkin">Check-in</button>
-        <button data-id="${h.id}" data-estado="disponible" class="btn-cancelar btn-cambiar-estado">Cancelar reserva</button>
-      `;
+    case "reservada": {
+      const rr = reservasReservadasPorHab[h.id];
+      const nombre = (rr?.huesped || "").trim() || "Huésped";
+      const idReserva = rr?.id;
+      const aviso = `<p class="text-xs text-amber-900 leading-snug mb-2">🔒 Reservado para <strong>${escapeHtml(nombre)}</strong> · Ir a <strong>Reservas</strong> para hacer check-in</p>`;
+      if (idReserva) {
+        return `${aviso}<button type="button" class="btn-cancelar btn-cancelar-reserva-tarjeta" data-reserva-id="${idReserva}" data-huesped="${escapeHtml(nombre)}" data-habitacion-numero="${escapeHtml(String(h.numero))}">Cancelar reserva</button>`;
+      }
+      return `${aviso}<button type="button" class="btn-cancelar btn-liberar-reservada-sin-registro" data-id="${h.id}" data-numero="${escapeHtml(String(h.numero))}">Liberar habitación</button>
+        <p class="text-[11px] text-slate-500 mt-1">Sin reserva formal en el sistema (ej. marcada manualmente). Esto solo cambia el estado a disponible.</p>`;
+    }
     case "limpieza":
       return `
         <button data-id="${h.id}" data-estado="disponible" class="btn-limpieza-ok btn-cambiar-estado">Marcar disponible</button>
@@ -309,6 +322,23 @@ function enlazarBotones() {
       cancelarCheckinHabitacion(Number(btn.dataset.id)),
     ),
   );
+  els.grid.querySelectorAll(".btn-cancelar-reserva-tarjeta").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      cancelarReservaDesdeTarjetaHabitacion({
+        reservaId: Number(btn.dataset.reservaId),
+        huesped: btn.dataset.huesped || "Huésped",
+        habitacionNumero: btn.dataset.habitacionNumero || "",
+      }),
+    ),
+  );
+  els.grid.querySelectorAll(".btn-liberar-reservada-sin-registro").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      liberarHabitacionReservadaSinReservaFormal(
+        Number(btn.dataset.id),
+        btn.dataset.numero || "",
+      ),
+    ),
+  );
 }
 
 async function cambiarEstado(id, estado) {
@@ -319,6 +349,46 @@ async function cambiarEstado(id, estado) {
   } catch (error) {
     showToast(`Error cambiando estado: ${error.message}`, "error");
   }
+}
+
+/**
+ * Cancela la reserva vía API (pestaña Habitaciones: sólo cancelación, no check-in).
+ */
+async function cancelarReservaDesdeTarjetaHabitacion({
+  reservaId,
+  huesped,
+  habitacionNumero,
+}) {
+  if (!reservaId) {
+    showToast("No se encontró el id de la reserva", "error");
+    return;
+  }
+  const ok = confirm(
+    `¿Estás seguro de cancelar la reserva de ${huesped} en habitación #${habitacionNumero}?`,
+  );
+  if (!ok) return;
+  try {
+    await post(`/reservas/${reservaId}/cancelar`, {
+      porcentaje_reembolso: 0,
+      nota: "Cancelación desde pestaña Habitaciones",
+    });
+    showToast("Reserva cancelada", "success");
+    document.dispatchEvent(
+      new CustomEvent("reserva:cancelada", { detail: { reserva_id: reservaId } }),
+    );
+    await loadHabitaciones();
+  } catch (error) {
+    showToast(`Error al cancelar la reserva: ${error.message}`, "error");
+  }
+}
+
+/** Habitación ``reservada`` sin fila en ``/reservas`` (marcada a mano): vuelve a disponible. */
+async function liberarHabitacionReservadaSinReservaFormal(habitacionId, numero) {
+  const ok = confirm(
+    `¿Liberar la habitación #${numero}? No hay reserva formal en el sistema; solo se marcará como disponible.`,
+  );
+  if (!ok) return;
+  await cambiarEstado(habitacionId, "disponible");
 }
 
 // ---------------------------------------------------------------------------

@@ -33,8 +33,15 @@ const els = {
 
 let habitaciones = [];
 let tasaBcv = 405.35;
+let reservaCanceladaListenerRegistrado = false;
 
 export async function initReservas() {
+  if (!reservaCanceladaListenerRegistrado) {
+    reservaCanceladaListenerRegistrado = true;
+    document.addEventListener("reserva:cancelada", () => {
+      void loadReservas();
+    });
+  }
   if (els.form) {
     els.form.addEventListener("submit", crearReserva);
     els.form.addEventListener("change", manejarCambioForm);
