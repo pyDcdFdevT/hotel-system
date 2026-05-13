@@ -970,6 +970,98 @@ const ESTADO_DETALLE_LABEL = {
   entregado: "Entregado",
 };
 
+function estadoDetalleEditable(estado) {
+  return (estado || "pendiente") === "pendiente";
+}
+
+function tooltipEstadoBloqueado(estado) {
+  const e = estado || "pendiente";
+  if (e === "en_preparacion") return "Producto en preparación";
+  if (e === "listo") return "Producto listo: ya no se puede editar";
+  if (e === "entregado") return "Producto entregado: ya no se puede editar";
+  return "Este producto no se puede editar";
+}
+
+function buildItemsPayloadFromDetallesConCambio(detalleId, accion) {
+  const detalles = state.pedidoActivo?.detalles || [];
+  const objetivo = detalles.find((d) => d.id === detalleId);
+  if (!objetivo) {
+    throw new Error("Detalle no encontrado");
+  }
+  const estado = objetivo.estado || "pendiente";
+  if (!estadoDetalleEditable(estado)) {
+    throw new Error(tooltipEstadoBloqueado(estado));
+  }
+
+  // Mapa producto_id -> cantidad total para PUT /pedidos/{id}/items.
+  const cantidades = new Map();
+  for (const d of detalles) {
+    const pid = Number(d.producto_id);
+    const cant = Number(d.cantidad || 0);
+    cantidades.set(pid, (cantidades.get(pid) || 0) + cant);
+  }
+  const pidObjetivo = Number(objetivo.producto_id);
+  const actual = cantidades.get(pidObjetivo) || 0;
+
+  if (accion === "inc") {
+    cantidades.set(pidObjetivo, actual + 1);
+  } else if (accion === "dec") {
+    const nuevo = actual - 1;
+    if (nuevo > 0) cantidades.set(pidObjetivo, nuevo);
+    else cantidades.delete(pidObjetivo);
+  } else if (accion === "remove") {
+    cantidades.delete(pidObjetivo);
+  } else {
+    throw new Error("Acción inválida");
+  }
+
+  return Array.from(cantidades.entries())
+    .filter(([, c]) => c > 0)
+    .map(([producto_id, cantidad]) => ({ producto_id, cantidad }));
+}
+
+async function actualizarItemsServidorConAccion(detalleId, accion) {
+  if (!state.pedidoActivo?.id) return;
+
+  let payloadItems;
+  try {
+    payloadItems = buildItemsPayloadFromDetallesConCambio(detalleId, accion);
+  } catch (error) {
+    showToast(error.message || "No se pudo modificar el producto", "info");
+    return;
+  }
+
+  // Si no queda ningún producto en la cuenta, preguntar si se cancela.
+  if (payloadItems.length === 0) {
+    const confirmar = confirm(
+      "La cuenta quedará vacía. ¿Deseas cancelar la cuenta vacía?",
+    );
+    if (confirmar) {
+      try {
+        await deleteApi(`/pedidos/${state.pedidoActivo.id}/cancelar`);
+        showToast("Cuenta vacía cancelada", "info");
+        resetearEstadoCuenta();
+        await Promise.all([cargarCuentasPendientes(), cargarProductos()]);
+      } catch (error) {
+        showToast(`Error cancelando cuenta vacía: ${error.message}`, "error");
+      }
+    }
+    return;
+  }
+
+  try {
+    const pedido = await put(`/pedidos/${state.pedidoActivo.id}/items`, {
+      items: payloadItems,
+    });
+    state.pedidoActivo = pedido;
+    // Re-cargar productos para reflejar stock actualizado.
+    await Promise.all([cargarCuentasPendientes(), cargarProductos()]);
+    refrescarUI();
+  } catch (error) {
+    showToast(`Error actualizando producto: ${error.message}`, "error");
+  }
+}
+
 function renderCarrito() {
   if (!els.carrito) return;
   const filasServidor = [];
@@ -980,6 +1072,8 @@ function renderCarrito() {
       const estado = d.estado || "pendiente";
       const icono = ESTADO_DETALLE_ICONO[estado] || "⏳";
       const label = ESTADO_DETALLE_LABEL[estado] || estado;
+      const editable = estadoDetalleEditable(estado);
+      const tooltip = editable ? "" : tooltipEstadoBloqueado(estado);
       const accion =
         estado === "listo"
           ? `<button class="btn-entregar text-xs text-emerald-700 underline" data-detalle-id="${d.id}" title="Marcar como entregado al cliente">Entregar</button>`
@@ -990,10 +1084,32 @@ function renderCarrito() {
         <tr class="bg-slate-50">
           <td>
             ${escapeHtmlPos(nombre)}
-            <span class="text-xs text-slate-500" title="${label}">${icono} ${label}</span>
+            <span class="cart-item-status badge badge-${estado}" title="${label}">${icono} ${label}</span>
           </td>
           <td>${formatUsd(d.precio_unit_usd)}<br><span class="text-xs text-slate-500">${formatBs(d.precio_unit_bs)}</span></td>
-          <td>${Number(d.cantidad).toFixed(2)}</td>
+          <td>
+            <div class="cart-item-actions">
+              <button
+                class="cart-action-btn btn-decrease btn-server-dec"
+                data-detalle-id="${d.id}"
+                ${editable ? "" : "disabled"}
+                title="${tooltip}"
+              >−</button>
+              <span class="cart-item-qty">${Number(d.cantidad).toFixed(2)}</span>
+              <button
+                class="cart-action-btn btn-increase btn-server-inc"
+                data-detalle-id="${d.id}"
+                ${editable ? "" : "disabled"}
+                title="${tooltip}"
+              >+</button>
+              <button
+                class="cart-action-btn btn-remove btn-server-remove"
+                data-detalle-id="${d.id}"
+                ${editable ? "" : "disabled"}
+                title="${tooltip || "Eliminar producto"}"
+              >🗑️</button>
+            </div>
+          </td>
           <td>${formatUsd(d.subtotal_usd)}<br><span class="text-xs text-slate-500">${formatBs(d.subtotal_bs)}</span></td>
           <td>${accion}</td>
         </tr>
@@ -1046,6 +1162,21 @@ function renderCarrito() {
   els.carrito.querySelectorAll(".btn-entregar").forEach((btn) =>
     btn.addEventListener("click", () =>
       marcarDetalleEntregado(Number(btn.dataset.detalleId)),
+    ),
+  );
+  els.carrito.querySelectorAll(".btn-server-inc").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      actualizarItemsServidorConAccion(Number(btn.dataset.detalleId), "inc"),
+    ),
+  );
+  els.carrito.querySelectorAll(".btn-server-dec").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      actualizarItemsServidorConAccion(Number(btn.dataset.detalleId), "dec"),
+    ),
+  );
+  els.carrito.querySelectorAll(".btn-server-remove").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      actualizarItemsServidorConAccion(Number(btn.dataset.detalleId), "remove"),
     ),
   );
 

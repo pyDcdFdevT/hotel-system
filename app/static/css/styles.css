@@ -465,6 +465,87 @@ th {
   font-weight: 600;
 }
 
+/* ===== POS carrito: acciones + / - / eliminar ===== */
+.cart-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.cart-item-qty {
+  min-width: 2.1rem;
+  text-align: center;
+  font-weight: 600;
+  color: #0f172a;
+}
+.cart-action-btn {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  border: 1px solid #cbd5e1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.08s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.cart-action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.cart-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-decrease {
+  background: #eef2ff;
+  color: #3730a3;
+}
+.btn-decrease:hover:not(:disabled) {
+  background: #e0e7ff;
+}
+.btn-increase {
+  background: #ecfdf5;
+  color: #065f46;
+}
+.btn-increase:hover:not(:disabled) {
+  background: #d1fae5;
+}
+.btn-remove {
+  background: #fef2f2;
+  color: #991b1b;
+}
+.btn-remove:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 9999px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  margin-left: 0.35rem;
+}
+.badge-pendiente {
+  background: #fffbeb;
+  color: #92400e;
+}
+.badge-en_preparacion {
+  background: #fff7ed;
+  color: #9a3412;
+}
+.badge-listo {
+  background: #ecfdf5;
+  color: #065f46;
+}
+.badge-entregado {
+  background: #f1f5f9;
+  color: #334155;
+}
+
 /* Contenedor con scroll para el acordeón de categorías en POS. */
 .pos-categorias-container {
   max-height: 60vh;
